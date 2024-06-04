@@ -54,11 +54,11 @@ async fn main() {
         let tm = tm.clone();
         let from_key = format!("0x{}", i).as_bytes().to_vec();
         for j in a..i {
-            let from_key = from_key.clone();
             let tm = tm.clone();
+            let from_key = from_key.clone();
+            let to_key = format!("0x{}", j).as_bytes().to_vec();
 
             trans_set.spawn(async move {
-                let to_key = format!("0x{}", j).as_bytes().to_vec();
                 retry_transaction(tm, |txn| {
                     let amt = SVMPrimitives::U24(1).to_term();
 
@@ -66,7 +66,7 @@ async fn main() {
                     if let Some(value) = txn.read(from_key.clone()) {
                         let args = { Some(vec![value.to_term(), amt.clone()]) };
 
-                        match svm::run_code(ADD_CODE, args).expect("run code err") {
+                        match svm::run_code(SUB_CODE, args).expect("run code err") {
                             Some((term, _stats, diags)) => {
                                 eprint!("{diags}");
                                 println!("Result:\n{}", term.display_pretty(0));
