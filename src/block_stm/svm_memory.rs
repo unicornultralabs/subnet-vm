@@ -26,14 +26,14 @@ impl SVMMemory {
     }
 }
 
-struct Transaction<'a> {
+pub struct Transaction<'a> {
     tm: &'a SVMMemory,
     read_set: HashMap<Vec<u8>, (SVMPrimitives, Version)>,
     write_set: HashMap<Vec<u8>, SVMPrimitives>,
 }
 
 impl<'a> Transaction<'a> {
-    fn new(tm: &'a SVMMemory) -> Self {
+    pub fn new(tm: &'a SVMMemory) -> Self {
         Transaction {
             tm,
             read_set: HashMap::new(),
@@ -41,7 +41,7 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn read(&mut self, key: Vec<u8>) -> Option<SVMPrimitives> {
+    pub fn read(&mut self, key: Vec<u8>) -> Option<SVMPrimitives> {
         if let Some(value) = self.write_set.get(&key) {
             return Some(value.clone());
         }
@@ -54,7 +54,7 @@ impl<'a> Transaction<'a> {
         None
     }
 
-    fn write(&mut self, key: Vec<u8>, value: SVMPrimitives) {
+    pub fn write(&mut self, key: Vec<u8>, value: SVMPrimitives) {
         self.write_set.insert(key, value);
     }
 
@@ -89,7 +89,7 @@ impl<'a> Transaction<'a> {
     }
 }
 
-fn retry_transaction<F>(tm: &SVMMemory, transaction_fn: F)
+pub fn retry_transaction<F>(tm: &SVMMemory, transaction_fn: F)
 where
     F: Fn(&mut Transaction) -> (),
 {
