@@ -1,10 +1,10 @@
-use std::{sync::Arc, thread::spawn};
-
 use block_stm::svm_memory::{retry_transaction, SVMMemory};
 use log::info;
+use std::sync::Arc;
 use svm::{
-    builtins::{ADD_CODE, SUB_CODE},
+    builtins::{ADD_CODE_ID, SUB_CODE_ID},
     primitive_types::SVMPrimitives,
+    SVM,
 };
 use tokio::{task::JoinSet, time::Instant};
 
@@ -16,21 +16,15 @@ pub mod svm;
 async fn main() {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    // if let Some((term, _stats, diags)) =
-    //     svm::run_code(PARALLEL_HELLO_WORLD_CODE, None, None).expect("run code err")
-    // {
-    //     eprint!("{diags}");
-    //     println!("Result:\n{}", term.display_pretty(0));
-    // }
-
     // initially set value
     let tm = Arc::new(SVMMemory::new());
+    let svm = Arc::new(SVM::new());
     let mut set = JoinSet::new();
     let now = Instant::now();
     info!("start allocation");
 
     let a = 1;
-    let b = 100000;
+    let b = 3;
 
     for i in a..=b {
         let tm = tm.clone();
@@ -51,10 +45,13 @@ async fn main() {
     let now = Instant::now();
     info!("start transfering");
     for i in (a + 1..=b).rev() {
+        let svm = svm.clone();
         let tm = tm.clone();
         let from_key = format!("0x{}", i).as_bytes().to_vec();
         for j in a..i {
+            info!("{} -> {}", i, j);
             let tm = tm.clone();
+            let svm = svm.clone();
             let from_key = from_key.clone();
             let to_key = format!("0x{}", j).as_bytes().to_vec();
 
@@ -66,9 +63,13 @@ async fn main() {
                     if let Some(value) = txn.read(from_key.clone()) {
                         let args = { Some(vec![value.to_term(), amt.clone()]) };
 
-                        match svm::run_code(SUB_CODE, args).expect("run code err") {
-                            Some((term, _stats, diags)) => {
-                                eprint!("{diags}");
+                        match svm
+                            .clone()
+                            .run_code(SUB_CODE_ID, args)
+                            .expect("run code err")
+                        {
+                            Some((term, _stats, _diags)) => {
+                                // eprint!("{diags}");
                                 println!("Result:\n{}", term.display_pretty(0));
                                 txn.write(from_key.clone(), SVMPrimitives::from_term(term));
                             }
@@ -82,9 +83,13 @@ async fn main() {
                     if let Some(value) = txn.read(to_key.clone()) {
                         let args = { Some(vec![value.to_term(), amt]) };
 
-                        match svm::run_code(ADD_CODE, args).expect("run code err") {
-                            Some((term, _stats, diags)) => {
-                                eprint!("{diags}");
+                        match svm
+                            .clone()
+                            .run_code(ADD_CODE_ID, args)
+                            .expect("run code err")
+                        {
+                            Some((term, _stats, _diags)) => {
+                                // eprint!("{diags}");
                                 println!("Result:\n{}", term.display_pretty(0));
                                 txn.write(to_key.clone(), SVMPrimitives::from_term(term));
                             }
@@ -102,4 +107,14 @@ async fn main() {
         "finish transfering elapesed_microsec={}",
         now.elapsed().as_micros()
     );
+
+    for i in a..=b {
+        let tm = tm.clone();
+        let key = format!("0x{}", i).as_bytes().to_vec();
+        retry_transaction(tm, |txn| {
+            if let Some(val) = txn.read(key.clone()) {
+                info!("{}: {:?}", i, val);
+            }
+        });
+    }
 }

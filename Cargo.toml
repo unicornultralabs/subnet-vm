@@ -1,5 +1,6 @@
 [package]
 name = "subnet-vm"
+authors = ["rameight"]
 version = "0.1.0"
 edition = "2021"
 
@@ -11,3 +12,4 @@ dashmap = "5.5.0"
 tokio = { version = "1.32.0", features = ["full"] }
 log = "0.4.20"
 env_logger = "0.10.0"
+chrono = "0.4.38"

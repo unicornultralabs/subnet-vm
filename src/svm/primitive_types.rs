@@ -1,7 +1,7 @@
 use crate::svm::fun::Num::U24;
 use bend::fun::Term;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SVMPrimitives {
     U24(u32),
 }
