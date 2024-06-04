@@ -2,7 +2,10 @@ use std::{sync::Arc, thread::spawn};
 
 use block_stm::svm_memory::{retry_transaction, SVMMemory};
 use log::info;
-use svm::{builtins::ADD_CODE, primitive_types::SVMPrimitives};
+use svm::{
+    builtins::{ADD_CODE, SUB_CODE},
+    primitive_types::SVMPrimitives,
+};
 use tokio::{task::JoinSet, time::Instant};
 
 pub mod block_stm;
@@ -25,7 +28,11 @@ async fn main() {
     let mut set = JoinSet::new();
     let now = Instant::now();
     info!("start allocation");
-    for i in 1..=100000 {
+
+    let a = 1;
+    let b = 100000;
+
+    for i in a..=b {
         let tm = tm.clone();
         set.spawn(async move {
             let key = format!("0x{}", i).as_bytes().to_vec();
@@ -35,26 +42,64 @@ async fn main() {
         });
     }
     while let Some(_) = set.join_next().await {}
-    info!("finish allocation elapesed_microsec={}", now.elapsed().as_micros());
+    info!(
+        "finish allocation elapesed_microsec={}",
+        now.elapsed().as_micros()
+    );
 
-    // // execute with vm and store back
-    // retry_transaction(&tm, |txn| {
-    //     if let Some(value) = txn.read(key.clone()) {
-    //         let args = {
-    //             let amt = SVMPrimitives::U24(100).to_term();
-    //             Some(vec![value.to_term(), amt])
-    //         };
+    let mut trans_set = JoinSet::new();
+    let now = Instant::now();
+    info!("start transfering");
+    for i in (a + 1..=b).rev() {
+        let tm = tm.clone();
+        let from_key = format!("0x{}", i).as_bytes().to_vec();
+        for j in a..i {
+            let from_key = from_key.clone();
+            let tm = tm.clone();
 
-    //         match svm::run_code(ADD_CODE, Some("add"), args).expect("run code err") {
-    //             Some((term, _stats, diags)) => {
-    //                 eprint!("{diags}");
-    //                 println!("Result:\n{}", term.display_pretty(0));
-    //                 txn.write(key.clone(), SVMPrimitives::from_term(term));
-    //             }
-    //             None => {
-    //                 eprint!("svm execution failed");
-    //             }
-    //         }
-    //     }
-    // });
+            trans_set.spawn(async move {
+                let to_key = format!("0x{}", j).as_bytes().to_vec();
+                retry_transaction(tm, |txn| {
+                    let amt = SVMPrimitives::U24(1).to_term();
+
+                    // sub
+                    if let Some(value) = txn.read(from_key.clone()) {
+                        let args = { Some(vec![value.to_term(), amt.clone()]) };
+
+                        match svm::run_code(ADD_CODE, args).expect("run code err") {
+                            Some((term, _stats, diags)) => {
+                                eprint!("{diags}");
+                                println!("Result:\n{}", term.display_pretty(0));
+                                txn.write(from_key.clone(), SVMPrimitives::from_term(term));
+                            }
+                            None => {
+                                eprint!("svm execution failed");
+                            }
+                        }
+                    }
+
+                    // add
+                    if let Some(value) = txn.read(to_key.clone()) {
+                        let args = { Some(vec![value.to_term(), amt]) };
+
+                        match svm::run_code(ADD_CODE, args).expect("run code err") {
+                            Some((term, _stats, diags)) => {
+                                eprint!("{diags}");
+                                println!("Result:\n{}", term.display_pretty(0));
+                                txn.write(to_key.clone(), SVMPrimitives::from_term(term));
+                            }
+                            None => {
+                                eprint!("svm execution failed");
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    }
+    while let Some(_) = set.join_next().await {}
+    info!(
+        "finish transfering elapesed_microsec={}",
+        now.elapsed().as_micros()
+    );
 }

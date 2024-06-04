@@ -11,13 +11,13 @@ pub mod primitive_types;
 
 pub fn run_code(
     code: &str,
-    entrypoint: Option<&str>,
+    // entrypoint: Option<&str>,
     arguments: Option<Vec<Term>>,
 ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
     let load_book = || -> Result<Book, Diagnostics> {
         let builtins = fun::Book::builtins();
         let mut book = do_parse_book(code, Path::new(""), builtins)?;
-        book.entrypoint = entrypoint.map(Name::new);
+        // book.entrypoint = entrypoint.map(Name::new);
         Ok(book)
     };
     let book = load_book().expect("lb failed");
