@@ -1,19 +1,22 @@
 use bend::{
     diagnostics::{Diagnostics, DiagnosticsConfig},
-    fun::{self, load_book::do_parse_book, Book, Term},
+    fun::{self, load_book::do_parse_book, Book, Name, Term},
     run_book, CompileOpts, RunOpts,
 };
 use std::path::Path;
 
 pub mod builtins;
+pub mod primitive_types;
 
 pub fn run_code(
     code: &str,
+    entrypoint: Option<&str>,
     arguments: Option<Vec<Term>>,
 ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
     let load_book = || -> Result<Book, Diagnostics> {
         let builtins = fun::Book::builtins();
-        let book = do_parse_book(code, Path::new(""), builtins)?;
+        let mut book = do_parse_book(code, Path::new(""), builtins)?;
+        book.entrypoint = entrypoint.map(Name::new);
         Ok(book)
     };
     let book = load_book().expect("lb failed");
