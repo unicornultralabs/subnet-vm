@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 bend-lang = { git = "https://github.com/HigherOrderCO/Bend", branch = "main" }
+dashmap = "5.5.0"

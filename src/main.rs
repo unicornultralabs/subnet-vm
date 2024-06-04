@@ -3,6 +3,7 @@ use svm::{
     primitive_types::SVMPrimitives,
 };
 
+pub mod block_stm;
 pub mod svm;
 
 fn main() {
