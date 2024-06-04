@@ -1,4 +1,4 @@
-use crate::svm::fun::Num::U24;
+use bend::fun::Num::U24;
 use bend::fun::Term;
 
 #[derive(Clone, Debug)]

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use svm::{
     builtins::{ADD_CODE_ID, SUB_CODE_ID},
     primitive_types::SVMPrimitives,
-    SVM,
+    svm::SVM,
 };
 use tokio::{task::JoinSet, time::Instant};
 
