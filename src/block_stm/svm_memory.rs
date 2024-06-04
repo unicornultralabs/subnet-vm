@@ -1,14 +1,9 @@
-use crate::svm::primitive_types::SVMPrimitives;
+use crate::svm::{
+    object::{SVMObject, Version},
+    primitive_types::SVMPrimitives,
+};
 use dashmap::DashMap;
 use std::{collections::HashMap, sync::Arc};
-
-type Version = u64;
-
-#[derive(Clone)]
-pub struct SVMObject<T> {
-    value: T,
-    version: Version,
-}
 
 #[derive(Clone)]
 pub struct SVMMemory {

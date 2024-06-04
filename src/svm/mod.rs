@@ -6,6 +6,7 @@ use bend::{
 use std::path::Path;
 
 pub mod builtins;
+pub mod object;
 pub mod primitive_types;
 
 pub fn run_code(
