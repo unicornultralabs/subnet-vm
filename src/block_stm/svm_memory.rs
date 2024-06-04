@@ -33,7 +33,7 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
-    pub fn new(tm: &'a SVMMemory) -> Self {
+    pub fn new(tm: &'a Arc<SVMMemory>) -> Self {
         Transaction {
             tm,
             read_set: HashMap::new(),
@@ -89,12 +89,12 @@ impl<'a> Transaction<'a> {
     }
 }
 
-pub fn retry_transaction<F>(tm: &SVMMemory, transaction_fn: F)
+pub fn retry_transaction<F>(tm: Arc<SVMMemory>, transaction_fn: F)
 where
     F: Fn(&mut Transaction) -> (),
 {
     loop {
-        let mut txn = Transaction::new(tm);
+        let mut txn = Transaction::new(&tm);
         transaction_fn(&mut txn);
 
         match txn.commit() {
