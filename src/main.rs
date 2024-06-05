@@ -2,6 +2,7 @@ use block_stm::svm_memory::{retry_transaction, SVMMemory};
 use futures::{SinkExt, StreamExt};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
 use svm::{
     builtins::{ADD_CODE_ID, SUB_CODE_ID, TRANSFER_CODE_ID},
@@ -9,6 +10,7 @@ use svm::{
     svm::SVM,
 };
 use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::accept_async;
 use tokio::{task::JoinSet, time::Instant};
 
@@ -16,7 +18,7 @@ pub mod block_stm;
 pub mod executor;
 pub mod svm;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Transaction {
     from: String,
     to: String,
@@ -46,63 +48,87 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                         match item {
                             Message::Address(address) => {
                                 println!("Address: {}", address);
+                                write.send(WsMessage::Text(address)).await.unwrap_or_else(|e| {
+                                    eprintln!("Failed to send address: {}", e);
+                                });
                             }
                             Message::Transaction(transaction) => {
                                 println!("Transaction: {:?}", transaction);
-                                 // Process the transaction
-                                 let tm = tm.clone();
-                                 let svm = svm.clone();
-                                 tokio::spawn(async move {
-                                     process_transaction(
-                                        tm,
-                                        svm,
-                                        "0xa32d35f82f8743c16f52f3050d4ee25fa731d99b".to_string(),
-                                        transaction
-                                    ).await;
-                                 });
+                                // Process the transaction
+                                let tm = tm.clone();
+                                let svm = svm.clone();
+                                tokio::spawn(async move {
+                                    process_transaction(tm, svm, transaction).await;
+                                });
+                                // let response = json!(transaction).to_string();
+                                // write.send(WsMessage::Text(transaction)).await.unwrap_or_else(|e| {
+                                //     eprintln!("Failed to send transaction response: {}", e);
+                                // });
                             }
                         }
                     }
-                    write.send(msg).await.unwrap();
+                    // write.send(msg.clone()).await.unwrap();
+                   
                 }
             }
             Err(e) => {
-                eprintln!("Error processing message: {}", e);
+                error!("Error processing message: {}", e);
                 break;
             }
         }
     }
 }
 
+
 async fn process_transaction(
     tm: Arc<SVMMemory>,
     svm: Arc<SVM>,
-    id: String,
     transaction: Transaction
 ) {
-    let key_vec = id.clone().as_bytes().to_vec();
-    if let Err(e) = retry_transaction(tm, |txn| {
-        txn.write(key_vec.clone(), SVMPrimitives::U24(transaction.amount));
-        let value = match txn.read(key_vec.clone()) {
-            Some(value) => value,
-            None => return Err(format!("key={} does not exist", id)),
-        };
-        let amount = SVMPrimitives::U24(transaction.amount).to_term();
-        let args = Some(vec![value.to_term(), amount]);
+    // let from_key = format!("0x{}", transaction.from);
+    // let to_key = format!("0x{}", transaction.to);
+    let from_key_vec = transaction.from.clone().as_bytes().to_vec();
+    let to_key_vec = transaction.to.clone().as_bytes().to_vec();
 
-        // just the beginning, for further implementation: add and sub balance
-        match svm.clone().run_code(ADD_CODE_ID, args) {
+    if let Err(e) = retry_transaction(tm.clone(), |txn| {
+        let from_value = match txn.read(from_key_vec.clone()) {
+            Some(value) => value,
+            None => return Err(format!("key={} does not exist", transaction.from)),
+        };
+        let to_value = match txn.read(to_key_vec.clone()) {
+            Some(value) => value,
+            None => return Err(format!("key={} does not exist", transaction.to)),
+        };
+        let amt = SVMPrimitives::U24(transaction.amount).to_term();
+
+        let args = Some(vec![from_value.to_term(), to_value.to_term(), amt]);
+        match svm.clone().run_code(TRANSFER_CODE_ID, args) {
             Ok(Some((term, _stats, _diags))) => {
-                txn.write(key_vec.clone(), SVMPrimitives::from_term(term.clone()));
-                Ok(vec![SVMPrimitives::from_term(term)])
+                println!(
+                    "from_key={} Result:\n{}",
+                    transaction.from.clone(),
+                    term.display_pretty(0)
+                );
+
+                let result = SVMPrimitives::from_term(term.clone());
+                match result {
+                    SVMPrimitives::Tup(ref els) => {
+                        let (from_val, to_val) = (els[0].clone(), els[1].clone());
+                        txn.write(from_key_vec.clone(), from_val);
+                        txn.write(to_key_vec.clone(), to_val);
+                        return Ok(Some(result));
+                    }
+                    _ => return Err("unexpected type of result".to_owned()),
+                };
             }
-            Ok(None) => Err(format!("svm execution failed err=none result")),
-            Err(e) => Err(format!("svm execution failed err={}", e)),
+            Ok(None) => return Err(format!("svm execution failed err=none result")),
+            Err(e) => return Err(format!("svm execution failed err={}", e)),
         }
     }) {
-        error!("transaction failed id={} err={}", id, e);
+        error!("from_key={} err={}", transaction.from.clone(), e);
     }
 }
+
 
 
 #[tokio::main]
