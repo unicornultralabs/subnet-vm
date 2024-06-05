@@ -141,12 +141,16 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
     let now = Instant::now();
     let mut set = JoinSet::new();
 
+    let mut total_txs = 0;
+
     for i in (a + 1..=b).rev() {
         let svm = svm.clone();
         let tm = tm.clone();
         let from_key = format!("0x{}", i);
         let from_key_vec = from_key.as_bytes().to_vec();
         for j in a..i {
+            total_txs += 1;
+
             let tm = tm.clone();
             let svm = svm.clone();
             let from_key = from_key.clone();
@@ -198,7 +202,8 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
     }
     while let Some(_) = set.join_next().await {}
     info!(
-        "finish transfering elapesed_microsec={}",
+        "finish transfering total_txs={} elapesed_microsec={}",
+        total_txs,
         now.elapsed().as_micros()
     );
 }
