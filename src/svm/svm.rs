@@ -85,8 +85,9 @@ impl SVM {
         } = compile_book(&mut book, compile_opts.clone(), diagnostics_cfg, args)?;
         eprint!("{diagnostics}");
 
-        let out = Self::run_hvm(&core_book.build())?;
-        let (net, stats) = parse_hvm_output(&out)?;
+        // let out = Self::run_hvm(&core_book.build())?;
+        // let (net, stats) = parse_hvm_output(&out)?;
+        let (net, stats) = Self::run_hvm(&core_book.build())?;
         let (term, diags) = readback_hvm_net(
             &net,
             &book,
@@ -98,7 +99,7 @@ impl SVM {
         Ok(Some((term, stats, diags)))
     }
 
-    pub fn run_hvm(book: &hvm::hvm::Book) -> Result<String, String> {
+    pub fn run_hvm(book: &hvm::hvm::Book) -> Result<(hvm::ast::Net, String), String> {
         // Initializes the global net
         let net = GNet::new(1 << 29, 1 << 29);
 
@@ -122,38 +123,42 @@ impl SVM {
         // Stops the timer
         let duration = start.elapsed();
 
-        let mut result = "".to_string();
-
-        // Parse the result
-        if let Some(tree) = hvm::ast::Net::readback(&net, book) {
-            result = format!("{}\n{}", result, format!("Result: {}", tree.show()));
-        } else {
-            result = format!(
-                "{}\n{}",
-                result,
-                format!("Readback failed. Printing GNet memdump...\n")
-            );
-            result = format!("{}\n{}", result, format!("{}", net.show()));
-        };
-
         // Prints interactions and time
-        let itrs = net.itrs.load(std::sync::atomic::Ordering::Relaxed);
-        result = format!("{}\n{}", result, format!("- ITRS: {}", itrs));
-        result = format!(
-            "{}\n{}",
-            result,
-            format!("- TIME: {:.2}s", duration.as_secs_f64())
-        );
-        result = format!(
-            "{}\n{}",
-            result,
+        let stats = {
+            let itrs = net.itrs.load(std::sync::atomic::Ordering::Relaxed);
             format!(
-                "- MIPS: {:.2}",
+                r#"- ITRS: {}
+- TIME: {:.2}s
+- MIPS: {:.2}"#,
+                itrs,
+                duration.as_secs_f64(),
                 itrs as f64 / duration.as_secs_f64() / 1_000_000.0
             )
-        );
+        };
 
-        Ok(result)
+        // Parse the result
+        let result = if let Some(tree) = hvm::ast::Net::readback(&net, book) {
+            format!("Result: {}", tree.show())
+        } else {
+            format!(
+                r#"Readback failed. Printing GNet memdump...
+{}"#,
+                net.show()
+            )
+        };
+
+        let mut p = ::hvm::ast::CoreParser::new(&result);
+        let Ok(net) = p.parse_net() else {
+            return Err(format!(
+                "Failed to parse result from HVM (invalid net).\nOutput from HVM was:\n{:?}",
+                format!(
+                    r#"{}
+{}"#,
+                    result, stats
+                )
+            ));
+        };
+        Ok((net, stats))
     }
 }
 
