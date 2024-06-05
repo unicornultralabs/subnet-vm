@@ -106,8 +106,6 @@ impl SVM {
         } = compile_book(&mut book, compile_opts.clone(), diagnostics_cfg, args)?;
         eprint!("{diagnostics}");
 
-        // let out = Self::run_hvm(&core_book.build())?;
-        // let (net, stats) = parse_hvm_output(&out)?;
         let (net, stats) = Self::run_hvm(&core_book.build())?;
         let (term, diags) = readback_hvm_net(
             &net,
@@ -149,8 +147,8 @@ impl SVM {
             let itrs = net.itrs.load(std::sync::atomic::Ordering::Relaxed);
             format!(
                 r#"- ITRS: {}
-    - TIME: {:.2}s
-    - MIPS: {:.2}"#,
+- TIME: {:.2}s
+- MIPS: {:.2}"#,
                 itrs,
                 duration.as_secs_f64(),
                 itrs as f64 / duration.as_secs_f64() / 1_000_000.0
@@ -163,20 +161,18 @@ impl SVM {
         } else {
             format!(
                 r#"Readback failed. Printing GNet memdump...
-    {}"#,
+{}"#,
                 net.show()
             )
         };
-        // println!("hvm source");
-        // println!("{}", result);
 
-        let mut p = ::hvm::ast::CoreParser::new(&result);
+        let mut p = hvm::ast::CoreParser::new(&result);
         let Ok(net) = p.parse_net() else {
             return Err(format!(
                 "Failed to parse result from HVM (invalid net).\nOutput from HVM was:\n{:?}",
                 format!(
                     r#"{}
-    {}"#,
+{}"#,
                     result, stats
                 )
             ));
