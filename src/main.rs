@@ -3,12 +3,11 @@ use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::accept_async;
 use std::sync::Arc;
 use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::{task::JoinSet, time::Instant};
-
+use tokio_tungstenite::accept_async;
 
 pub mod block_stm;
 pub mod executor;
@@ -27,7 +26,6 @@ struct SubmitTransaction {
 enum Message {
     SubmitTransaction(SubmitTransaction),
 }
-
 
 #[tokio::main]
 async fn main() {
@@ -229,7 +227,7 @@ fn query(tm: Arc<SVMMemory>, a: u32, b: u32) {
     );
 }
 
-async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>){
+async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
     info!("web socket is running on: {}", addr);
 
@@ -260,12 +258,14 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                         match item {
                             Message::SubmitTransaction(transaction) => {
                                 tokio::spawn(async move {
-                                    let result = process_transaction(transaction, tm_loop, svm_loop);
+                                    let result =
+                                        process_transaction(transaction, tm_loop, svm_loop);
                                     let mut send = send_clone.lock().await;
                                     match result {
                                         Ok(svm) => {
                                             if let Ok(json_result) = serde_json::to_string(&svm) {
-                                                if let Err(e) = send.send(json_result.into()).await {
+                                                if let Err(e) = send.send(json_result.into()).await
+                                                {
                                                     println!("failed to send svm result: {}", e);
                                                 }
                                             } else {
@@ -273,18 +273,20 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                                                     println!("failed to convert svm result to json string: {}", e);
                                                 }
                                             }
-                                        },
+                                        }
                                         Err(err) => {
                                             if let Err(e) = send.send(err.clone().into()).await {
-                                                println!("svm err: {}, ws send message err: {}", err, e);
+                                                println!(
+                                                    "svm err: {}, ws send message err: {}",
+                                                    err, e
+                                                );
                                             }
-                                        },
+                                        }
                                     }
                                 });
-                            }
-                            // _ => {
-                            //     error!("Unknown message type");
-                            // }
+                            } // _ => {
+                              //     error!("Unknown message type");
+                              // }
                         }
                     }
                     // write.send(msg.clone()).await.unwrap();
@@ -300,8 +302,8 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
 
 fn process_transaction(
     transaction: SubmitTransaction,
-    tm: Arc<SVMMemory>, 
-    svm: Arc<SVM>
+    tm: Arc<SVMMemory>,
+    svm: Arc<SVM>,
 ) -> Result<SVMPrimitives, std::string::String> {
     let tm = tm.clone();
     let svm = svm.clone();
@@ -319,7 +321,7 @@ fn process_transaction(
             Some(value) => value,
             None => return Err(format!("key={} does not exist", to_key)),
         };
-        let amt = SVMPrimitives::U24(1).to_term();
+        let amt = SVMPrimitives::U24(transaction.amount).to_term();
 
         let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
         match svm.clone().run_code(TRANSFER_CODE_ID, args) {
