@@ -109,7 +109,7 @@ where
             Ok(_) => return Ok(ret_val),
             Err(_) => {
                 txn.rollback();
-                sleep(Duration::from_millis(10)); // Simple backoff strategy
+                sleep(Duration::from_micros(10)); // Simple backoff strategy
             }
         }
     }
