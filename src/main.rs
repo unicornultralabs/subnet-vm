@@ -255,12 +255,11 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
             Ok(msg) => {
                 if msg.is_text() || msg.is_binary() {
                     let text = msg.clone().into_text().unwrap();
-                    let parsed: Vec<Message> = serde_json::from_str(&text).unwrap();
-                    for item in parsed {
+                    let send_clone = Arc::clone(&ws_send);
+                    if let Ok(message) = serde_json::from_str::<Message>(&text) {
                         let tm_loop = Arc::clone(&tm);
                         let svm_loop = Arc::clone(&svm);
-                        let send_clone = Arc::clone(&ws_send);
-                        match item {
+                        match message {
                             Message::SubmitTransaction(transaction) => {
                                 tokio::spawn(async move {
                                     let result =
@@ -274,7 +273,13 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                                                     println!("failed to send svm result: {}", e);
                                                 }
                                             } else {
-                                                if let Err(e) = send.send("failed to convert svm result to json string".into()).await {
+                                                if let Err(e) = send
+                                                    .send(
+                                                        "failed to convert svm result to json string"
+                                                            .into(),
+                                                    )
+                                                    .await
+                                                {
                                                     println!("failed to convert svm result to json string: {}", e);
                                                 }
                                             }
@@ -289,12 +294,17 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                                         }
                                     }
                                 });
-                            } // _ => {
-                              //     error!("Unknown message type");
-                              // }
+                            }
+                        }
+                    } else {
+                        let mut send = send_clone.lock().await;
+                        if let Err(e) = send
+                            .send("failed to parse Message from client".into())
+                            .await
+                        {
+                            println!("failed to parse Message from client, err={}", e);
                         }
                     }
-                    // write.send(msg.clone()).await.unwrap();
                 }
             }
             Err(e) => {
