@@ -12,16 +12,22 @@ pub mod svm;
 async fn main() {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    // initially set value
     let tm = Arc::new(SVMMemory::new());
     let svm = Arc::new(SVM::new());
-    let mut set = JoinSet::new();
-    let now = Instant::now();
-    info!("start allocation");
 
     let a = 1;
     let b = 10;
 
+    alloc(tm.clone(), a, b).await;
+    query(tm.clone(), a, b);
+
+    transfer(tm.clone(), svm.clone(), a, b);
+    query(tm.clone(), a, b);
+}
+
+async fn alloc(tm: Arc<SVMMemory>, a: u32, b: u32) {
+    let now = Instant::now();
+    let mut set = JoinSet::new();
     for i in a..=b {
         let tm = tm.clone();
         set.spawn(async move {
@@ -40,6 +46,10 @@ async fn main() {
         "finish allocation elapesed_microsec={}",
         now.elapsed().as_micros()
     );
+}
+
+fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
+    let now = Instant::now();
 
     for i in (a + 1..=b).rev() {
         let tm = tm.clone();
@@ -93,6 +103,10 @@ async fn main() {
         "finish transfer elapesed_microsec={}",
         now.elapsed().as_micros()
     );
+}
+
+fn query(tm: Arc<SVMMemory>, a: u32, b: u32) {
+    let now = Instant::now();
 
     for i in a..=b {
         let tm = tm.clone();
