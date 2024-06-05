@@ -24,7 +24,7 @@ async fn main() {
     info!("start allocation");
 
     let a = 1;
-    let b = 1;
+    let b = 100000;
 
     for i in a..=b {
         let tm = tm.clone();
@@ -44,7 +44,7 @@ async fn main() {
                     {
                         Some((term, _stats, diags)) => {
                             eprint!("{diags}");
-                            println!("{:?} Result:\n{}", key.clone(), term.display_pretty(0));
+                            // println!("{:?} Result:\n{}", key.clone(), term.display_pretty(0));
                             txn.write(key.clone(), SVMPrimitives::from_term(term));
                         }
                         None => {
