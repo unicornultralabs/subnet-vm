@@ -64,11 +64,11 @@ async fn main() {
             match svm.clone().run_code(TRANSFER_CODE_ID, args) {
                 Ok(Some((term, _stats, _diags))) => {
                     // eprint!("i={} {diags}", i);
-                    println!(
-                        "from_key={} Result:\n{}",
-                        from_key.clone(),
-                        term.display_pretty(0)
-                    );
+                    // println!(
+                    //     "from_key={} Result:\n{}",
+                    //     from_key.clone(),
+                    //     term.display_pretty(0)
+                    // );
 
                     let result = SVMPrimitives::from_term(term.clone());
                     match result {
@@ -89,9 +89,28 @@ async fn main() {
         }
         // });
     }
-    while let Some(_) = set.join_next().await {}
     info!(
         "finish transfer elapesed_microsec={}",
+        now.elapsed().as_micros()
+    );
+
+    for i in a..=b {
+        let tm = tm.clone();
+        let key = format!("0x{}", i);
+        let key_vec = key.clone().as_bytes().to_vec();
+        if let Err(e) = retry_transaction(tm, |txn| {
+            let from_value = match txn.read(key_vec.clone()) {
+                Some(value) => value,
+                None => return Err(format!("key={} does not exist", key)),
+            };
+            info!("key={} Result:{:?}", key.clone(), from_value);
+            Ok(None)
+        }) {
+            error!("key={} err={}", key.clone(), e);
+        }
+    }
+    info!(
+        "finish query elapesed_microsec={}",
         now.elapsed().as_micros()
     );
 }
