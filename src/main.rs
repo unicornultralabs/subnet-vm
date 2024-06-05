@@ -34,21 +34,23 @@ async fn main() {
             let key_vec = key.clone().as_bytes().to_vec();
             if let Err(e) = retry_transaction(tm, |txn| {
                 txn.write(key_vec.clone(), SVMPrimitives::U24(i));
-                if let Some(value) = txn.read(key_vec.clone()) {
-                    let amt = SVMPrimitives::U24(1).to_term();
-                    let args = { Some(vec![value.to_term(), amt]) };
-                    match svm.clone().run_code(ADD_CODE_ID, args) {
-                        Ok(Some((term, _stats, _diags))) => {
-                            // eprint!("i={} {diags}", i);
-                            // println!("{:?} Result:\n{}", key.clone(), term.display_pretty(0));
-                            txn.write(key_vec.clone(), SVMPrimitives::from_term(term.clone()));
-                            return Ok(vec![SVMPrimitives::from_term(term)]);
-                        }
-                        Ok(None) => return Err(format!("svm execution failed err=none result")),
-                        Err(e) => return Err(format!("svm execution failed err={}", e)),
-                    };
-                }
-                Ok(vec![])
+                let value = match txn.read(key_vec.clone()) {
+                    Some(value) => value,
+                    None => return Err(format!("key={} does not exist", key)),
+                };
+                
+                let amt = SVMPrimitives::U24(1).to_term();
+                let args = { Some(vec![value.to_term(), amt]) };
+                match svm.clone().run_code(ADD_CODE_ID, args) {
+                    Ok(Some((term, _stats, _diags))) => {
+                        // eprint!("i={} {diags}", i);
+                        // println!("{:?} Result:\n{}", key.clone(), term.display_pretty(0));
+                        txn.write(key_vec.clone(), SVMPrimitives::from_term(term.clone()));
+                        return Ok(vec![SVMPrimitives::from_term(term)]);
+                    }
+                    Ok(None) => return Err(format!("svm execution failed err=none result")),
+                    Err(e) => return Err(format!("svm execution failed err={}", e)),
+                };
             }) {
                 error!("key={} err={}", key.clone(), e);
             }
