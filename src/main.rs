@@ -15,6 +15,10 @@ async fn main() {
     let tm = Arc::new(SVMMemory::new());
     let svm = Arc::new(SVM::new());
 
+    run_example(tm.clone(), svm.clone()).await;
+}
+
+async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     let a = 1;
     let b = 10;
 
