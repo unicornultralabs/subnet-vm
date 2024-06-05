@@ -41,14 +41,14 @@ async fn main() {
                         Ok(Some((term, _stats, _diags))) => {
                             // eprint!("i={} {diags}", i);
                             // println!("{:?} Result:\n{}", key.clone(), term.display_pretty(0));
-                            txn.write(key_vec.clone(), SVMPrimitives::from_term(term));
-                            return Ok(());
+                            txn.write(key_vec.clone(), SVMPrimitives::from_term(term.clone()));
+                            return Ok(vec![SVMPrimitives::from_term(term)]);
                         }
                         Ok(None) => return Err(format!("svm execution failed err=none result")),
                         Err(e) => return Err(format!("svm execution failed err={}", e)),
                     };
                 }
-                Ok(())
+                Ok(vec![])
             }) {
                 error!("key={} err={}", key.clone(), e);
             }
