@@ -33,7 +33,7 @@ async fn main() {
 
     let tm = Arc::new(SVMMemory::new());
     let svm = Arc::new(SVM::new());
-    let addr = "127.0.0.1:9001";
+    let addr = "0.0.0.0:9001";
 
     let a = 1;
     let b = 10;

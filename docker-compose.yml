@@ -1,0 +1,13 @@
+version: "3"
+services:
+  subnet_vm:
+    container_name: subnet_vm
+    image: u2u/subnet-vm
+    build: .
+    ports:
+      - 9001:9001/tcp
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2048m"
