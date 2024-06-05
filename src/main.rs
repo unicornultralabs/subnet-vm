@@ -1,9 +1,9 @@
-use block_stm::svm_memory::{retry_transaction, SVMMemory, Transaction};
-use futures::stream::SplitSink;
+use block_stm::svm_memory::{retry_transaction, SVMMemory};
+use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio_tungstenite::accept_async;
 use std::sync::Arc;
 use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use tokio::net::{TcpListener, TcpStream};
@@ -37,6 +37,10 @@ async fn main() {
     let svm = Arc::new(SVM::new());
     let addr = "127.0.0.1:9001";
 
+    let a = 1;
+    let b = 10;
+
+    alloc(tm.clone(), a, b).await;
     run_ws(&addr, tm, svm).await;
 }
 
@@ -170,7 +174,8 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
     let ws_stream = accept_async(raw_stream)
         .await
         .expect("Error during the websocket handshake occurred");
-    let (mut write, mut read) = ws_stream.split();
+    let (write, mut read) = ws_stream.split();
+    let ws_send = Arc::new(Mutex::new(write));
 
     while let Some(message) = read.next().await {
         match message {
@@ -181,20 +186,28 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                     for item in parsed {
                         let tm_loop = Arc::clone(&tm);
                         let svm_loop = Arc::clone(&svm);
+                        let send_clone = Arc::clone(&ws_send);
                         match item {
                             Message::SubmitTransaction(transaction) => {
                                 tokio::spawn(async move {
                                     let result = process_transaction(transaction, tm_loop, svm_loop);
+                                    let mut send = send_clone.lock().await;
                                     match result {
                                         Ok(svm) => {
                                             if let Ok(json_result) = serde_json::to_string(&svm) {
-                                                println!("result svm: {:?}", json_result);
+                                                if let Err(e) = send.send(json_result.into()).await {
+                                                    println!("failed to send svm result: {}", e);
+                                                }
                                             } else {
-                                                println!("failed to convert svm result to json string");
+                                                if let Err(e) = send.send("failed to convert svm result to json string".into()).await {
+                                                    println!("failed to convert svm result to json string: {}", e);
+                                                }
                                             }
                                         },
                                         Err(err) => {
-                                            println!("{}", err);
+                                            if let Err(e) = send.send(err.clone().into()).await {
+                                                println!("svm err: {}, ws send message err: {}", err, e);
+                                            }
                                         },
                                     }
                                 });
