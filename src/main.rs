@@ -1,4 +1,4 @@
-use block_stm::svm_memory::{retry_transaction, SVMMemory};
+use block_stm::svm_memory::{retry_transaction, SVMMemory, Transaction};
 use log::{error, info};
 use std::sync::Arc;
 use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
@@ -15,7 +15,39 @@ async fn main() {
     let tm = Arc::new(SVMMemory::new());
     let svm = Arc::new(SVM::new());
 
-    run_example(tm.clone(), svm.clone()).await;
+    let from_amount = 100;
+    let to_amount = 50;
+    let transfer_amount = 5;
+
+    let from = SVMPrimitives::U24(from_amount);
+    let to = SVMPrimitives::U24(to_amount);
+    let transfer = SVMPrimitives::U24(transfer_amount);
+
+    let from_key = "0xEd899f12dc83c59eA830e0aA903c7684655E29be";
+    let to_key = "0x456";
+    
+    let from_key_vec = from_key.as_bytes().to_vec();
+    let to_key_vec = to_key.as_bytes().to_vec();
+    
+    let txn = &mut Transaction::new(&tm);
+    
+    let args = { Some(vec![from.to_term(), to.to_term(), transfer.to_term()]) };
+    match svm.clone().run_code(TRANSFER_CODE_ID, args) {
+        Ok(Some((term, _stats, _diags))) => {
+            let result = SVMPrimitives::from_term(term.clone());
+            match result {
+                SVMPrimitives::Tup(ref els) => {
+                    let (from_val, to_val) = (els[0].clone(), els[1].clone());
+                    txn.write(from_key_vec.clone(), from_val);
+                    txn.write(to_key_vec.clone(), to_val);
+                    println!("result: {:?}", result);
+                }
+                _ => println!("unexpected type of result"),
+            };
+        }
+        Ok(None) => println!("svm execution failed err=none result"),
+        Err(e) => println!("svm execution failed err={}", e),
+    };
 }
 
 async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
