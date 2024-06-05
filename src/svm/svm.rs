@@ -2,7 +2,7 @@ use bend::{
     compile_book,
     diagnostics::{Diagnostics, DiagnosticsConfig},
     fun::{self, load_book::do_parse_book, Book, Term},
-    readback_hvm_net, CompileOpts, CompileResult, RunOpts,
+    readback_hvm_net, run_book, CompileOpts, CompileResult, RunOpts,
 };
 use builtins::{ADD_CODE, ADD_CODE_ID, SUB_CODE, SUB_CODE_ID};
 use chrono::Utc;
@@ -40,7 +40,7 @@ impl SVM {
         self: Arc<Self>,
         code_id: &str,
         // TODO(rameight): HVM2 doesn't enable entrypoint running yet.
-        // entrypoint: Option<&str>, 
+        // entrypoint: Option<&str>,
         arguments: Option<Vec<Term>>,
     ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
         let book = self.books.get(code_id).expect("load book failed").clone();
@@ -71,7 +71,13 @@ impl SVM {
             repeated_bind: bend::diagnostics::Severity::Allow,
             recursion_cycle: bend::diagnostics::Severity::Allow,
         };
-        self.run_book(book, run_opts, compile_opts, diagnostics_cfg, arguments)
+        self.run_book(
+            book.clone(),
+            run_opts.clone(),
+            compile_opts.clone(),
+            diagnostics_cfg,
+            arguments.clone(),
+        )
 
         // TODO(rameight): by calling the hvm binary, it does not work as expected
         // since it fails to streamlining the VM result
@@ -153,7 +159,7 @@ impl SVM {
 
         // Parse the result
         let result = if let Some(tree) = hvm::ast::Net::readback(&net, book) {
-            format!("Result: {}", tree.show())
+            format!("{}", tree.show())
         } else {
             format!(
                 r#"Readback failed. Printing GNet memdump...
@@ -161,6 +167,8 @@ impl SVM {
                 net.show()
             )
         };
+        // println!("hvm source");
+        // println!("{}", result);
 
         let mut p = ::hvm::ast::CoreParser::new(&result);
         let Ok(net) = p.parse_net() else {
