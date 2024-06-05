@@ -1,15 +1,13 @@
+use super::builtins::{self, TRANSFER_CODE, TRANSFER_CODE_ID};
 use bend::{
     compile_book,
     diagnostics::{Diagnostics, DiagnosticsConfig},
     fun::{self, load_book::do_parse_book, Book, Term},
-    readback_hvm_net, run_book, CompileOpts, CompileResult, RunOpts,
+    readback_hvm_net, CompileOpts, CompileResult, RunOpts,
 };
 use builtins::{ADD_CODE, ADD_CODE_ID, SUB_CODE, SUB_CODE_ID};
-use chrono::Utc;
 use hvm::hvm::{GNet, TMem};
 use std::{collections::HashMap, path::Path, sync::Arc};
-
-use super::builtins::{self, TRANSFER_CODE, TRANSFER_CODE_ID};
 
 pub struct SVM {
     books: Arc<HashMap<String, Book>>,
@@ -44,12 +42,10 @@ impl SVM {
         arguments: Option<Vec<Term>>,
     ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
         let book = self.books.get(code_id).expect("load book failed").clone();
-        let ramdomized_hvm_out_path = format!("{}.out.hvm", Utc::now().timestamp_nanos());
         let run_opts = RunOpts {
             linear_readback: false,
             pretty: false,
             hvm_path: "hvm".to_string(),
-            hvm_out_path: ramdomized_hvm_out_path,
         };
 
         let compile_opts = CompileOpts {
@@ -71,13 +67,7 @@ impl SVM {
             repeated_bind: bend::diagnostics::Severity::Allow,
             recursion_cycle: bend::diagnostics::Severity::Allow,
         };
-        self.run_book(
-            book.clone(),
-            run_opts.clone(),
-            compile_opts.clone(),
-            diagnostics_cfg,
-            arguments.clone(),
-        )
+        self.run_book(book, run_opts, compile_opts, diagnostics_cfg, arguments)
 
         // TODO(rameight): by calling the hvm binary, it does not work as expected
         // since it fails to streamlining the VM result
