@@ -39,7 +39,8 @@ impl SVM {
     pub fn run_code(
         self: Arc<Self>,
         code_id: &str,
-        // entrypoint: Option<&str>,
+        // TODO(rameight): HVM2 doesn't enable entrypoint running yet.
+        // entrypoint: Option<&str>, 
         arguments: Option<Vec<Term>>,
     ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
         let book = self.books.get(code_id).expect("load book failed").clone();
@@ -71,7 +72,7 @@ impl SVM {
             recursion_cycle: bend::diagnostics::Severity::Allow,
         };
         self.run_book(book, run_opts, compile_opts, diagnostics_cfg, arguments)
-        
+
         // TODO(rameight): by calling the hvm binary, it does not work as expected
         // since it fails to streamlining the VM result
         // run_book(
