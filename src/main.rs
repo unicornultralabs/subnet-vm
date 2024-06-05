@@ -1,11 +1,7 @@
 use block_stm::svm_memory::{retry_transaction, SVMMemory};
 use log::{error, info};
 use std::sync::Arc;
-use svm::{
-    builtins::{ADD_CODE_ID, SUB_CODE_ID},
-    primitive_types::SVMPrimitives,
-    svm::SVM,
-};
+use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use tokio::{task::JoinSet, time::Instant};
 
 pub mod block_stm;
@@ -24,33 +20,16 @@ async fn main() {
     info!("start allocation");
 
     let a = 1;
-    let b = 100000;
+    let b = 10;
 
     for i in a..=b {
         let tm = tm.clone();
-        let svm = svm.clone();
         set.spawn(async move {
             let key = format!("0x{}", i);
             let key_vec = key.clone().as_bytes().to_vec();
             if let Err(e) = retry_transaction(tm, |txn| {
                 txn.write(key_vec.clone(), SVMPrimitives::U24(i));
-                let value = match txn.read(key_vec.clone()) {
-                    Some(value) => value,
-                    None => return Err(format!("key={} does not exist", key)),
-                };
-                
-                let amt = SVMPrimitives::U24(1).to_term();
-                let args = { Some(vec![value.to_term(), amt]) };
-                match svm.clone().run_code(ADD_CODE_ID, args) {
-                    Ok(Some((term, _stats, _diags))) => {
-                        // eprint!("i={} {diags}", i);
-                        // println!("{:?} Result:\n{}", key.clone(), term.display_pretty(0));
-                        txn.write(key_vec.clone(), SVMPrimitives::from_term(term.clone()));
-                        return Ok(vec![SVMPrimitives::from_term(term)]);
-                    }
-                    Ok(None) => return Err(format!("svm execution failed err=none result")),
-                    Err(e) => return Err(format!("svm execution failed err={}", e)),
-                };
+                Ok(None)
             }) {
                 error!("key={} err={}", key.clone(), e);
             }
@@ -62,80 +41,57 @@ async fn main() {
         now.elapsed().as_micros()
     );
 
-    // let mut trans_set = JoinSet::new();
-    // let now = Instant::now();
-    // info!("start transfering");
-    // for i in (a + 1..=b).rev() {
-    //     let svm = svm.clone();
-    //     let tm = tm.clone();
-    //     let from_key = format!("0x{}", i).as_bytes().to_vec();
-    //     for j in a..i {
-    //         info!("{} -> {}", i, j);
-    //         let tm = tm.clone();
-    //         let svm = svm.clone();
-    //         let from_key = from_key.clone();
-    //         let to_key = format!("0x{}", j).as_bytes().to_vec();
+    for i in (a + 1..=b).rev() {
+        let tm = tm.clone();
+        let svm = svm.clone();
+        // set.spawn(async move {
+        let from_key = format!("0x{}", i);
+        let to_key = format!("0x{}", i - 1);
+        let from_key_vec = from_key.clone().as_bytes().to_vec();
+        let to_key_vec = to_key.clone().as_bytes().to_vec();
+        if let Err(e) = retry_transaction(tm, |txn| {
+            let from_value = match txn.read(from_key_vec.clone()) {
+                Some(value) => value,
+                None => return Err(format!("key={} does not exist", from_key)),
+            };
+            let to_value = match txn.read(to_key_vec.clone()) {
+                Some(value) => value,
+                None => return Err(format!("key={} does not exist", to_key)),
+            };
+            let amt = SVMPrimitives::U24(1).to_term();
 
-    //         trans_set.spawn(async move {
-    //             retry_transaction(tm, |txn| {
-    //                 let amt = SVMPrimitives::U24(1).to_term();
+            let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
+            match svm.clone().run_code(TRANSFER_CODE_ID, args) {
+                Ok(Some((term, _stats, _diags))) => {
+                    // eprint!("i={} {diags}", i);
+                    println!(
+                        "from_key={} Result:\n{}",
+                        from_key.clone(),
+                        term.display_pretty(0)
+                    );
 
-    //                 // sub
-    //                 if let Some(value) = txn.read(from_key.clone()) {
-    //                     let args = { Some(vec![value.to_term(), amt.clone()]) };
-
-    //                     match svm
-    //                         .clone()
-    //                         .run_code(SUB_CODE_ID, args)
-    //                         .expect("run code err")
-    //                     {
-    //                         Some((term, _stats, _diags)) => {
-    //                             // eprint!("{diags}");
-    //                             println!("Result:\n{}", term.display_pretty(0));
-    //                             txn.write(from_key.clone(), SVMPrimitives::from_term(term));
-    //                         }
-    //                         None => {
-    //                             eprint!("svm execution failed");
-    //                         }
-    //                     }
-    //                 }
-
-    //                 // add
-    //                 if let Some(value) = txn.read(to_key.clone()) {
-    //                     let args = { Some(vec![value.to_term(), amt]) };
-
-    //                     match svm
-    //                         .clone()
-    //                         .run_code(ADD_CODE_ID, args)
-    //                         .expect("run code err")
-    //                     {
-    //                         Some((term, _stats, _diags)) => {
-    //                             // eprint!("{diags}");
-    //                             println!("Result:\n{}", term.display_pretty(0));
-    //                             txn.write(to_key.clone(), SVMPrimitives::from_term(term));
-    //                         }
-    //                         None => {
-    //                             eprint!("svm execution failed");
-    //                         }
-    //                     }
-    //                 }
-    //             });
-    //         });
-    //     }
-    // }
-    // while let Some(_) = set.join_next().await {}
-    // info!(
-    //     "finish transfering elapesed_microsec={}",
-    //     now.elapsed().as_micros()
-    // );
-
-    // for i in a..=b {
-    //     let tm = tm.clone();
-    //     let key = format!("0x{}", i).as_bytes().to_vec();
-    //     retry_transaction(tm, |txn| {
-    //         if let Some(val) = txn.read(key.clone()) {
-    //             info!("{}: {:?}", i, val);
-    //         }
-    //     });
-    // }
+                    let result = SVMPrimitives::from_term(term.clone());
+                    match result {
+                        SVMPrimitives::Tup(ref els) => {
+                            let (from_val, to_val) = (els[0].clone(), els[1].clone());
+                            txn.write(from_key_vec.clone(), from_val);
+                            txn.write(to_key_vec.clone(), to_val);
+                            return Ok(Some(result));
+                        }
+                        _ => return Err("unexpected type of result".to_owned()),
+                    };
+                }
+                Ok(None) => return Err(format!("svm execution failed err=none result")),
+                Err(e) => return Err(format!("svm execution failed err={}", e)),
+            };
+        }) {
+            error!("from_key={} err={}", from_key.clone(), e);
+        }
+        // });
+    }
+    while let Some(_) = set.join_next().await {}
+    info!(
+        "finish transfer elapesed_microsec={}",
+        now.elapsed().as_micros()
+    );
 }
