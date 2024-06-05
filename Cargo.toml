@@ -10,9 +10,10 @@ name = "subnet_vm"
 path = "src/main.rs"
 
 [dependencies]
-bend-lang = { git = "https://github.com/unicornultralabs/Bend", branch = "main" }
+bend-lang = { path = "../Bend" }
 dashmap = "5.5.0"
 tokio = { version = "1.32.0", features = ["full"] }
 log = "0.4.20"
 env_logger = "0.10.0"
 chrono = "0.4.38"
+hvm = "=2.0.17"
