@@ -5,18 +5,37 @@ use log::error;
 #[derive(Clone, Debug)]
 pub enum SVMPrimitives {
     U24(u32),
+    Tup(Vec<SVMPrimitives>),
 }
 
 impl SVMPrimitives {
     pub fn to_term(&self) -> Term {
         match self {
             SVMPrimitives::U24(inner) => bend::fun::Term::Num { val: U24(*inner) },
+            SVMPrimitives::Tup(inner) => bend::fun::Term::Fan {
+                fan: bend::fun::FanKind::Tup,
+                tag: bend::fun::Tag::Static,
+                els: inner.clone().iter().map(|e| e.clone().to_term()).collect(),
+            },
         }
     }
 
     pub fn from_term(term: Term) -> Self {
         match term {
             Term::Num { val: U24(inner) } => Self::U24(inner),
+            Term::Fan {
+                fan: _,
+                tag: _,
+                ref els,
+            } => {
+                let els = els.clone();
+                Self::Tup(
+                    els.clone()
+                        .iter()
+                        .map(|e| SVMPrimitives::from_term(e.clone()))
+                        .collect(),
+                )
+            }
             unsupported => {
                 error!("unsupported term {:#?}", unsupported.clone());
                 unsupported.display_pretty(0);
