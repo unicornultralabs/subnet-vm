@@ -89,16 +89,18 @@ impl<'a> Transaction<'a> {
     }
 }
 
-pub fn retry_transaction<F>(tm: Arc<SVMMemory>, transaction_fn: F)
+pub fn retry_transaction<F>(tm: Arc<SVMMemory>, transaction_fn: F) -> Result<(), String>
 where
-    F: Fn(&mut Transaction) -> (),
+    F: Fn(&mut Transaction) -> Result<(), String>,
 {
     loop {
         let mut txn = Transaction::new(&tm);
-        transaction_fn(&mut txn);
+        if let Err(e) = transaction_fn(&mut txn) {
+            return Err("transaction_fn execution failed".to_owned());
+        }
 
         match txn.commit() {
-            Ok(_) => break,
+            Ok(_) => return Ok(()),
             Err(_) => {
                 txn.rollback();
                 sleep(Duration::from_millis(10)); // Simple backoff strategy

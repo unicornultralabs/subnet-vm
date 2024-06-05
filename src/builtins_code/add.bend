@@ -1,2 +1,2 @@
-def main():
-  return 1 + 1
+def main(bal,amt):
+  return bal + amt
