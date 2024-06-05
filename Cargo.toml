@@ -13,7 +13,11 @@ path = "src/main.rs"
 bend-lang = { git = "https://github.com/unicornultralabs/Bend", branch = "main" }
 dashmap = "5.5.0"
 tokio = { version = "1.32.0", features = ["full"] }
+tokio-tungstenite = "0.16"
 log = "0.4.20"
 env_logger = "0.10.0"
 chrono = "0.4.38"
 hvm = "=2.0.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures = "0.3"

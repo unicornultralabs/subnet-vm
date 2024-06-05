@@ -1,8 +1,9 @@
 use bend::fun::Num::U24;
 use bend::fun::Term;
 use log::error;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SVMPrimitives {
     U24(u32),
     Tup(Vec<SVMPrimitives>),

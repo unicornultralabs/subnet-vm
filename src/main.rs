@@ -1,12 +1,33 @@
 use block_stm::svm_memory::{retry_transaction, SVMMemory, Transaction};
+use futures::stream::SplitSink;
+use futures::{SinkExt, StreamExt};
 use log::{error, info};
+use serde::{Deserialize, Serialize};
+use tokio_tungstenite::{accept_async, WebSocketStream};
 use std::sync::Arc;
 use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::{task::JoinSet, time::Instant};
+
 
 pub mod block_stm;
 pub mod executor;
 pub mod svm;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SubmitTransaction {
+    hash: String,
+    from: String,
+    to: String,
+    amount: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum Message {
+    SubmitTransaction(SubmitTransaction),
+}
+
 
 #[tokio::main]
 async fn main() {
@@ -14,40 +35,9 @@ async fn main() {
 
     let tm = Arc::new(SVMMemory::new());
     let svm = Arc::new(SVM::new());
+    let addr = "127.0.0.1:9001";
 
-    let from_amount = 100;
-    let to_amount = 50;
-    let transfer_amount = 5;
-
-    let from = SVMPrimitives::U24(from_amount);
-    let to = SVMPrimitives::U24(to_amount);
-    let transfer = SVMPrimitives::U24(transfer_amount);
-
-    let from_key = "0xEd899f12dc83c59eA830e0aA903c7684655E29be";
-    let to_key = "0x456";
-    
-    let from_key_vec = from_key.as_bytes().to_vec();
-    let to_key_vec = to_key.as_bytes().to_vec();
-    
-    let txn = &mut Transaction::new(&tm);
-    
-    let args = { Some(vec![from.to_term(), to.to_term(), transfer.to_term()]) };
-    match svm.clone().run_code(TRANSFER_CODE_ID, args) {
-        Ok(Some((term, _stats, _diags))) => {
-            let result = SVMPrimitives::from_term(term.clone());
-            match result {
-                SVMPrimitives::Tup(ref els) => {
-                    let (from_val, to_val) = (els[0].clone(), els[1].clone());
-                    txn.write(from_key_vec.clone(), from_val);
-                    txn.write(to_key_vec.clone(), to_val);
-                    println!("result: {:?}", result);
-                }
-                _ => println!("unexpected type of result"),
-            };
-        }
-        Ok(None) => println!("svm execution failed err=none result"),
-        Err(e) => println!("svm execution failed err={}", e),
-    };
+    run_ws(&addr, tm, svm).await;
 }
 
 async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
@@ -163,4 +153,113 @@ fn query(tm: Arc<SVMMemory>, a: u32, b: u32) {
         "finish query elapesed_microsec={}",
         now.elapsed().as_micros()
     );
+}
+
+async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>){
+    let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
+    info!("web socket is running on: {}", addr);
+
+    while let Ok((stream, _)) = listener.accept().await {
+        let tm = tm.clone();
+        let svm = svm.clone();
+        tokio::spawn(handle_connection(stream, tm, svm));
+    }
+}
+
+async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
+    let ws_stream = accept_async(raw_stream)
+        .await
+        .expect("Error during the websocket handshake occurred");
+    let (mut write, mut read) = ws_stream.split();
+
+    while let Some(message) = read.next().await {
+        match message {
+            Ok(msg) => {
+                if msg.is_text() || msg.is_binary() {
+                    let text = msg.clone().into_text().unwrap();
+                    let parsed: Vec<Message> = serde_json::from_str(&text).unwrap();
+                    for item in parsed {
+                        let tm_loop = Arc::clone(&tm);
+                        let svm_loop = Arc::clone(&svm);
+                        match item {
+                            Message::SubmitTransaction(transaction) => {
+                                tokio::spawn(async move {
+                                    let result = process_transaction(transaction, tm_loop, svm_loop);
+                                    match result {
+                                        Ok(svm) => {
+                                            if let Ok(json_result) = serde_json::to_string(&svm) {
+                                                println!("result svm: {:?}", json_result);
+                                            } else {
+                                                println!("failed to convert svm result to json string");
+                                            }
+                                        },
+                                        Err(err) => {
+                                            println!("{}", err);
+                                        },
+                                    }
+                                });
+                            }
+                            // _ => {
+                            //     error!("Unknown message type");
+                            // }
+                        }
+                    }
+                    // write.send(msg.clone()).await.unwrap();
+                }
+            }
+            Err(e) => {
+                error!("Error processing message: {}", e);
+                break;
+            }
+        }
+    }
+}
+
+fn process_transaction(
+    transaction: SubmitTransaction,
+    tm: Arc<SVMMemory>, 
+    svm: Arc<SVM>
+) -> Result<SVMPrimitives, std::string::String> {
+    let tm = tm.clone();
+    let svm = svm.clone();
+    let from_key = transaction.from;
+    let to_key = transaction.to;
+    let from_key_vec = from_key.clone().as_bytes().to_vec();
+    let to_key_vec = to_key.clone().as_bytes().to_vec();
+
+    let result = retry_transaction(tm, |txn| {
+        let from_value = match txn.read(from_key_vec.clone()) {
+            Some(value) => value,
+            None => return Err(format!("key={} does not exist", from_key)),
+        };
+        let to_value = match txn.read(to_key_vec.clone()) {
+            Some(value) => value,
+            None => return Err(format!("key={} does not exist", to_key)),
+        };
+        let amt = SVMPrimitives::U24(1).to_term();
+
+        let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
+        match svm.clone().run_code(TRANSFER_CODE_ID, args) {
+            Ok(Some((term, _stats, _diags))) => {
+                let result = SVMPrimitives::from_term(term.clone());
+                match result {
+                    SVMPrimitives::Tup(ref els) => {
+                        let (from_val, to_val) = (els[0].clone(), els[1].clone());
+                        txn.write(from_key_vec.clone(), from_val);
+                        txn.write(to_key_vec.clone(), to_val);
+                        return Ok(Some(result));
+                    }
+                    _ => return Err("unexpected type of result".to_string()),
+                };
+            }
+            Ok(None) => Err("svm execution failed err=none result".to_string()),
+            Err(e) => Err(format!("svm execution failed err={}", e)),
+        }
+    });
+
+    match result {
+        Ok(Some(res)) => Ok(res),
+        Ok(None) => Err(format!("from_key={} did not produce a result", from_key)),
+        Err(e) => Err(format!("from_key={} err={}", from_key, e)),
+    }
 }
