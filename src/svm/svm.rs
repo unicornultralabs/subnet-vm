@@ -7,7 +7,7 @@ use builtins::{ADD_CODE, ADD_CODE_ID, SUB_CODE, SUB_CODE_ID};
 use chrono::Utc;
 use std::{collections::HashMap, path::Path, sync::Arc};
 
-use super::builtins;
+use super::builtins::{self, TRANSFER_CODE, TRANSFER_CODE_ID};
 
 pub struct SVM {
     books: Arc<HashMap<String, Book>>,
@@ -18,7 +18,11 @@ impl SVM {
         let mut books = HashMap::new();
 
         let builtins = fun::Book::builtins();
-        let codes = vec![(ADD_CODE_ID, ADD_CODE), (SUB_CODE_ID, SUB_CODE)];
+        let codes = vec![
+            (ADD_CODE_ID, ADD_CODE),
+            (SUB_CODE_ID, SUB_CODE),
+            (TRANSFER_CODE_ID, TRANSFER_CODE),
+        ];
         for code in codes {
             let builtins = builtins.clone();
             let book = do_parse_book(code.1, Path::new(""), builtins).expect("lb failed");

@@ -92,21 +92,21 @@ impl<'a> Transaction<'a> {
 pub fn retry_transaction<F>(
     tm: Arc<SVMMemory>,
     transaction_fn: F,
-) -> Result<Vec<SVMPrimitives>, String>
+) -> Result<Option<SVMPrimitives>, String>
 where
-    F: Fn(&mut Transaction) -> Result<Vec<SVMPrimitives>, String>,
+    F: Fn(&mut Transaction) -> Result<Option<SVMPrimitives>, String>,
 {
     loop {
         let mut txn = Transaction::new(&tm);
-        let returned_values = match transaction_fn(&mut txn) {
-            Ok(returned_values) => returned_values,
+        let ret_val = match transaction_fn(&mut txn) {
+            Ok(ret_val) => ret_val,
             Err(e) => {
                 return Err(format!("transaction_fn execution failed err={}", e));
             }
         };
 
         match txn.commit() {
-            Ok(_) => return Ok(returned_values),
+            Ok(_) => return Ok(ret_val),
             Err(_) => {
                 txn.rollback();
                 sleep(Duration::from_millis(10)); // Simple backoff strategy
