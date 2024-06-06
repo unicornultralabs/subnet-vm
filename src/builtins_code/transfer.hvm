@@ -1,0 +1,6 @@
+@main = a
+  & @transfer ~ (1 (2 (3 a)))
+
+@transfer = ($([-] $(a b)) ($([+] $(c d)) ({a c} (b d))))
+
+
