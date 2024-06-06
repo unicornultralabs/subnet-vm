@@ -119,11 +119,11 @@ where
 pub fn retry_transaction_with_timers<F>(
     smem: Arc<SVMMemory>,
     transaction_fn: F,
-) -> (Result<Option<SVMPrimitives>, String>, (u128, u128))
+) -> (Result<Option<SVMPrimitives>, String>, (u128, u128, u128))
 where
     F: Fn(&mut Transaction) -> (Result<Option<SVMPrimitives>, String>, (u128, u128)),
 {
-    let (mut vm_mrs, mut mem_mrs) = (0, 0);
+    let (mut vm_mrs, mut mem_mrs, mut backoff_mrs) = (0, 0, 0);
 
     loop {
         let mut txn = Transaction::new(&smem);
@@ -135,19 +135,19 @@ where
             Err(e) => {
                 return (
                     Err(format!("transaction_fn execution failed err={}", e)),
-                    (vm_mrs, mem_mrs),
+                    (vm_mrs, mem_mrs, backoff_mrs),
                 );
             }
         };
 
         let now = Instant::now();
         match txn.commit() {
-            Ok(_) => return (Ok(ret_val), (vm_mrs, mem_mrs)),
+            Ok(_) => return (Ok(ret_val), (vm_mrs, mem_mrs, backoff_mrs)),
             Err(_) => {
                 txn.rollback();
                 sleep(Duration::from_micros(10)); // Simple backoff strategy
             }
         }
-        mem_mrs += now.elapsed().as_micros();
+        backoff_mrs += now.elapsed().as_micros();
     }
 }

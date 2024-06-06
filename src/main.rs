@@ -154,7 +154,8 @@ async fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
 async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
     let now = Instant::now();
     let mut set = JoinSet::new();
-    let txs_timers: Arc<RwLock<HashMap<u64, (u128, u128)>>> = Arc::new(RwLock::new(HashMap::new()));
+    let txs_timers: Arc<RwLock<HashMap<u64, (u128, u128, u128)>>> =
+        Arc::new(RwLock::new(HashMap::new()));
 
     let mut total_txs = 0;
 
@@ -179,18 +180,45 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
 
             set.spawn(async move {
                 let (result, timers) = retry_transaction_with_timers(tm, |txn| {
+                    let (mut vm_mrs, mut mem_mrs) = (0, 0);
+
+                    let now = Instant::now();
                     let from_value = match txn.read(from_key_vec.clone()) {
-                        Some(value) => value,
-                        None => return Err(format!("key={} does not exist", from_key)),
+                        Some(value) => {
+                            mem_mrs += now.elapsed().as_micros();
+                            value
+                        }
+                        None => {
+                            mem_mrs += now.elapsed().as_micros();
+                            return (
+                                Err(format!("key={} does not exist", from_key)),
+                                (vm_mrs, mem_mrs),
+                            );
+                        }
                     };
+                    let now = Instant::now();
                     let to_value = match txn.read(to_key_vec.clone()) {
-                        Some(value) => value,
-                        None => return Err(format!("key={} does not exist", to_key)),
+                        Some(value) => {
+                            mem_mrs += now.elapsed().as_micros();
+                            value
+                        }
+                        None => {
+                            mem_mrs += now.elapsed().as_micros();
+                            return (
+                                Err(format!("key={} does not exist", to_key)),
+                                (vm_mrs, mem_mrs),
+                            );
+                        }
                     };
                     let amt = SVMPrimitives::U24(1).to_term();
 
                     let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
-                    match svm.clone().run_code(TRANSFER_CODE_ID, args) {
+
+                    let now = Instant::now();
+                    let svm_result = svm.clone().run_code(TRANSFER_CODE_ID, args);
+                    vm_mrs += now.elapsed().as_micros();
+
+                    match svm_result {
                         Ok(Some((term, _stats, _diags))) => {
                             // eprint!("i={} {diags}", i);
                             // println!(
@@ -205,13 +233,28 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
                                     let (from_val, to_val) = (els[0].clone(), els[1].clone());
                                     txn.write(from_key_vec.clone(), from_val);
                                     txn.write(to_key_vec.clone(), to_val);
-                                    return Ok(Some(result));
+                                    return (Ok(Some(result)), (vm_mrs, mem_mrs));
                                 }
-                                _ => return Err("unexpected type of result".to_owned()),
+                                _ => {
+                                    return (
+                                        Err("unexpected type of result".to_owned()),
+                                        (vm_mrs, mem_mrs),
+                                    )
+                                }
                             };
                         }
-                        Ok(None) => return Err(format!("svm execution failed err=none result")),
-                        Err(e) => return Err(format!("svm execution failed err={}", e)),
+                        Ok(None) => {
+                            return (
+                                Err(format!("svm execution failed err=none result")),
+                                (vm_mrs, mem_mrs),
+                            )
+                        }
+                        Err(e) => {
+                            return (
+                                Err(format!("svm execution failed err={}", e)),
+                                (vm_mrs, mem_mrs),
+                            )
+                        }
                     };
                 });
                 if let Err(e) = result {
@@ -235,9 +278,12 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
         for (txid, timers) in stats.iter() {
             let i = txid >> 32;
             let j = (txid << 32) >> 32;
-            stats_content.push_str(&format!("{},{},{},{}\n", i, j, timers.0, timers.1));
+            stats_content.push_str(&format!(
+                "{},{},{},{},{}\n",
+                i, j, timers.0, timers.1, timers.2
+            ));
         }
-        _ = fs::write("stat.svm", &stats_content);
+        _ = fs::write("stat.csv", &stats_content);
     }
 }
 
