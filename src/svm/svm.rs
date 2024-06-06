@@ -82,13 +82,11 @@ impl SVM {
         // TODO(rameight): HVM2 doesn't enable entrypoint running yet.
         // entrypoint: Option<&str>,
         arguments: Option<Vec<Term>>,
-    ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
+    ) -> (
+        Result<Option<(Term, String, Diagnostics)>, Diagnostics>,
+        (u128, u128, u128),
+    ) {
         let book = self.books.get(code_id).expect("load book failed").clone();
-        let run_opts = RunOpts {
-            linear_readback: false,
-            pretty: false,
-            hvm_path: "hvm".to_string(),
-        };
 
         let compile_opts = CompileOpts {
             eta: true,
@@ -109,7 +107,7 @@ impl SVM {
             repeated_bind: bend::diagnostics::Severity::Allow,
             recursion_cycle: bend::diagnostics::Severity::Allow,
         };
-        self.run_book(book, compile_opts, diagnostics_cfg, arguments)
+        self.run_book_with_timers(book, compile_opts, diagnostics_cfg, arguments)
 
         // TODO(rameight): by calling the hvm binary, it does not work as expected
         // since it fails to streamlining the VM result
@@ -150,7 +148,7 @@ impl SVM {
         let now = Instant::now();
         let (net, stats) = match Self::run_hvm(&core_book.build()) {
             Ok(r) => r,
-            Err(e) => return (Err(e), (0, 0, 0)),
+            Err(e) => return (Err(e.into()), (0, 0, 0)),
         };
         run_hvm_mrs += now.elapsed().as_micros();
 
