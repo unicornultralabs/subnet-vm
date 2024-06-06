@@ -121,36 +121,33 @@ pub fn retry_transaction_with_timers<F>(
     transaction_fn: F,
 ) -> (Result<Option<SVMPrimitives>, String>, (u128, u128))
 where
-    F: Fn(&mut Transaction) -> Result<Option<SVMPrimitives>, String>,
+    F: Fn(&mut Transaction) -> (Result<Option<SVMPrimitives>, String>, (u128, u128)),
 {
-    let mut fn_exec_mrs = 0;
-    let mut backoff_mrs = 0;
+    let (mut vm_mrs, mut mem_mrs) = (0, 0);
 
     loop {
         let mut txn = Transaction::new(&smem);
-        let now = Instant::now();
-        let ret_val = match transaction_fn(&mut txn) {
-            Ok(ret_val) => {
-                fn_exec_mrs += now.elapsed().as_micros();
-                ret_val
-            }
+        let (ret_val, (vm_time, mem_time)) = transaction_fn(&mut txn);
+        vm_mrs += vm_time;
+        mem_mrs += mem_time;
+        let ret_val = match ret_val {
+            Ok(ret_val) => ret_val,
             Err(e) => {
-                fn_exec_mrs += now.elapsed().as_micros();
                 return (
                     Err(format!("transaction_fn execution failed err={}", e)),
-                    (fn_exec_mrs, backoff_mrs),
+                    (vm_mrs, mem_mrs),
                 );
             }
         };
 
         let now = Instant::now();
         match txn.commit() {
-            Ok(_) => return (Ok(ret_val), (fn_exec_mrs, backoff_mrs)),
+            Ok(_) => return (Ok(ret_val), (vm_mrs, mem_mrs)),
             Err(_) => {
                 txn.rollback();
                 sleep(Duration::from_micros(10)); // Simple backoff strategy
             }
         }
-        backoff_mrs += now.elapsed().as_micros();
+        mem_mrs += now.elapsed().as_micros();
     }
 }
