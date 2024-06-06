@@ -41,10 +41,17 @@ struct QueryBalance {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct TakeNextStep {
+    code_hash: String,
+    address: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 enum Message {
     SubmitTransaction(SubmitTransaction),
     QueryBalance(QueryBalance),
+    TakeNextStep(TakeNextStep),
 }
 
 #[tokio::main]
@@ -457,6 +464,38 @@ async fn handle_connection(
                                     }
                                 });
                             }
+                            Message::TakeNextStep(step) => {
+                                tokio::spawn(async move {
+                                    let mut send = send_clone.lock().await;
+                                    let result = process_take_next_step(step.clone(), tm_loop, svm_loop);
+                                    match result {
+                                        Ok(ret_val) => {
+                                            // transform to confirmed transaction
+                                            let confirmed_transaction = ConfirmedTransaction {
+                                                code_hash: step.code_hash,
+                                                tx_hash: "".into(),
+                                                ret_value: Some(ret_val),
+                                                status: true,
+                                                errs: None
+                                            };
+                                            if let Ok(json_result) = serde_json::to_string(&confirmed_transaction) {
+                                                if let Err(e) = send.send(json_result.into()).await {
+                                                    println!("failed to send take next step result: {}", e);
+                                                }
+                                            } else {
+                                                if let Err(e) = send.send("failed to convert take next step result to json string".into()).await {
+                                                    println!("failed to convert take next step result to json string: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            if let Err(e) = send.send(err.into()).await {
+                                                println!("failed to send take next step error: {}", e);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
                             _ => {
                                 let mut send = send_clone.lock().await;
                                 if let Err(e) = send.send("unsupported message".into()).await {
@@ -481,7 +520,7 @@ fn process_transaction(
     transaction: SubmitTransaction,
     tm: Arc<SVMMemory>,
     svm: Arc<SVM>,
-) -> Result<SVMPrimitives, std::string::String> {
+) -> Result<SVMPrimitives, String> {
     let tm = tm.clone();
     let svm = svm.clone();
     let from_key = transaction.from;
@@ -545,6 +584,14 @@ fn process_query_balance(
         Ok(None) => Err(format!("key={} did not produce a result", query.address)),
         Err(e) => Err(format!("key={} err={}", query.address, e)),
     }
+}
+
+fn process_take_next_step(
+    query: TakeNextStep,
+    tm: Arc<SVMMemory>,
+    svm: Arc<SVM>,
+) -> Result<SVMPrimitives, String>{
+    Ok(SVMPrimitives::U24(1))
 }
 
 async fn on_ws_disconnected(tm: Arc<SVMMemory>, a:u32,  b: u32) {
