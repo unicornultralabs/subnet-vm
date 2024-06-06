@@ -21,12 +21,7 @@
    git clone https://github.com/unicornultralabs/subnet-vm.git
    ```
 
-2. Install hvm 2 runtime:
-   ```sh
-   cargo install hvm@2.0.17
-   ```
-
-3. Run the machine:
+2. Run the machine:
    ```sh
    cargo run
    ```
