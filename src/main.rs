@@ -21,6 +21,12 @@ struct SubmitTransaction {
     amount: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct QueryBalance {
+    code_hash: String,
+    address: String,
+}
+
 #[derive(Serialize)]
 struct ConfirmedTransaction {
     tx_hash: String,
@@ -34,6 +40,7 @@ struct ConfirmedTransaction {
 #[serde(untagged)]
 enum Message {
     SubmitTransaction(SubmitTransaction),
+    QueryBalance(QueryBalance),
 }
 
 #[tokio::main]
@@ -238,7 +245,7 @@ fn query(tm: Arc<SVMMemory>, a: u32, b: u32) {
         }
     }
     info!(
-        "finish query elapesed_microsec={}",
+        "finish query elapsed_microsec={}",
         now.elapsed().as_micros()
     );
 }
@@ -261,7 +268,6 @@ async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
                 }
             }
         });
-        // tokio::spawn(handle_connection(stream, tm, svm));
     }
 }
 
@@ -274,13 +280,11 @@ async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMem
             Ok(msg) => {
                 if msg.is_text() || msg.is_binary() {
                     let text = msg.clone().into_text().unwrap();
-                    info!("Received message: {}", text);
-                    // let parsed: Vec<Message> = serde_json::from_str(&text).unwrap();
+                    // info!("Received message: {}", text);
                     let send_clone = Arc::clone(&ws_send);
                     if let Ok(message) = serde_json::from_str::<Message>(&text) {
                         let tm_loop = Arc::clone(&tm);
                         let svm_loop = Arc::clone(&svm);
-                        // let send_clone = Arc::clone(&ws_send);
                         match message {
                             Message::SubmitTransaction(transaction) => {
                                 tokio::spawn(async move {
@@ -340,9 +344,40 @@ async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMem
                                         }
                                     }
                                 });
-                            } // _ => {
-                              //     error!("Unknown message type");
-                              // }
+                            }
+                            Message::QueryBalance(query) => {
+                                // tokio::spawn(async move {
+                                //     let mut send = send_clone.lock().await;
+                                //     let query_balance = query.clone();
+                                //     let key = query_balance.address.clone();
+                                //     let key_vec = key.clone().as_bytes().to_vec();
+                                //     let result = retry_transaction(tm_loop, |txn| {
+                                //         let value = match txn.read(key_vec.clone()) {
+                                //             Some(value) => value,
+                                //             None => return Err(format!("key={} does not exist", key)),
+                                //         };
+                                //         Ok(Some(value))
+                                //     });
+                                //     match result {
+                                //         Ok(ret_val) => {
+                                //             if let Ok(json_result) = serde_json::to_string(&ret_val) {
+                                //                 if let Err(e) = send.send(json_result.into()).await {
+                                //                     println!("failed to send query balance result: {}", e);
+                                //                 }
+                                //             } else {
+                                //                 if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
+                                //                     println!("failed to convert query balance result to json string: {}", e);
+                                //                 }
+                                //             }
+                                //         }
+                                //         Err(err) => {
+                                //             if let Err(e) = send.send(err.clone().into()).await {
+                                //                 println!("failed to send query balance error: {}", e);
+                                //             }
+                                //         }
+                                //     }
+                                // });
+                            }
                         }
                     }
                 }
@@ -386,6 +421,55 @@ fn process_transaction(
             ])
         };
         match svm.clone().run_code(&transaction.code_hash, args) {
+            Ok(Some((term, _stats, _diags))) => {
+                let result = SVMPrimitives::from_term(term.clone());
+                match result {
+                    SVMPrimitives::Tup(ref els) => {
+                        let (from_val, to_val) = (els[0].clone(), els[1].clone());
+                        txn.write(from_key_vec.clone(), from_val);
+                        txn.write(to_key_vec.clone(), to_val);
+                        return Ok(Some(result));
+                    }
+                    _ => return Err("unexpected type of result".to_string()),
+                };
+            }
+            Ok(None) => Err("svm execution failed err=none result".to_string()),
+            Err(e) => Err(format!("svm execution failed err={}", e)),
+        }
+    });
+
+    match result {
+        Ok(Some(res)) => Ok(res),
+        Ok(None) => Err(format!("from_key={} did not produce a result", from_key)),
+        Err(e) => Err(format!("from_key={} err={}", from_key, e)),
+    }
+}
+
+fn process_query_balance(
+    query: QueryBalance,
+    tm: Arc<SVMMemory>,
+    svm: Arc<SVM>,
+) -> Result<SVMPrimitives, std::string::String> {
+    let tm = tm.clone();
+    let svm = svm.clone();
+    let key_vec = query.address.clone().as_bytes().to_vec();
+
+
+    let result = retry_transaction(tm, |txn| {
+        let value = match txn.read(key_vec.clone()) {
+            Some(value) => value,
+            None => return Err(format!("address={} does not exist", query.address)),
+        };
+        let amt = SVMPrimitives::U24(transaction.amount).to_term();
+
+        let args = {
+            Some(vec![
+                from_value.to_term(),
+                to_value.to_term(),
+                amt,
+            ])
+        };
+        match svm.clone().run_code(&query.code_hash, args) {
             Ok(Some((term, _stats, _diags))) => {
                 let result = SVMPrimitives::from_term(term.clone());
                 match result {
