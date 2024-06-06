@@ -9,3 +9,6 @@ pub const SUB_CODE: &str = include_str!("../builtins_code/sub.bend");
 
 pub const TRANSFER_CODE_ID: &str = "0xtransfer";
 pub const TRANSFER_CODE: &str = include_str!("../builtins_code/transfer.bend");
+
+pub const DUANGUA_CODE_ID: &str = "0xduangua";
+pub const DUANGUA_CODE: &str = include_str!("../builtins_code/duangua.bend");
