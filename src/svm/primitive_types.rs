@@ -1,4 +1,4 @@
-use bend::fun::Num::U24;
+use bend::fun::{Name, Num::U24};
 use bend::fun::Term;
 use log::error;
 use serde::{Deserialize, Serialize};

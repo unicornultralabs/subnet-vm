@@ -203,14 +203,14 @@ async fn make_move(tm: Arc<SVMMemory>, svm: Arc<SVM>, aorb: u32) {
                 let result = SVMPrimitives::from_term(term.clone());
                 match result {
                     SVMPrimitives::Tup(ref els) => {
-                        let (person_step, _) = (els[0].clone(), els[1].clone());
+                        let (person_step, win) = (els[0].clone(), els[1].clone());
                         if aorb == 0 {
                             txn.write(from_key_vec.clone(), person_step);
                         } else {
                             txn.write(to_key_vec.clone(), person_step);
                         }
-                        println!("{:?}", els[1]);
-                        return Ok(Some(result));
+                        println!("{:?}", win);
+                        return Ok(Some(win));
                     }
                     unknown => {
                         return Err(format!("unexpected type of result unknown={:?}", unknown))
