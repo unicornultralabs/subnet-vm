@@ -7,7 +7,7 @@ use bend::{
 };
 use builtins::{ADD_CODE, ADD_CODE_ID, SUB_CODE, SUB_CODE_ID};
 use hvm::hvm::{GNet, TMem};
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
 
 pub struct SVM {
     books: Arc<HashMap<String, Book>>,
@@ -42,6 +42,48 @@ impl SVM {
         arguments: Option<Vec<Term>>,
     ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
         let book = self.books.get(code_id).expect("load book failed").clone();
+
+        let compile_opts = CompileOpts {
+            eta: true,
+            prune: false,
+            linearize_matches: bend::OptLevel::Enabled,
+            float_combinators: true,
+            merge: false,
+            inline: false,
+            check_net_size: false,
+            adt_encoding: bend::AdtEncoding::NumScott,
+        };
+        let diagnostics_cfg = DiagnosticsConfig {
+            verbose: false,
+            irrefutable_match: bend::diagnostics::Severity::Allow,
+            redundant_match: bend::diagnostics::Severity::Allow,
+            unreachable_match: bend::diagnostics::Severity::Allow,
+            unused_definition: bend::diagnostics::Severity::Allow,
+            repeated_bind: bend::diagnostics::Severity::Allow,
+            recursion_cycle: bend::diagnostics::Severity::Allow,
+        };
+        self.run_book(book, compile_opts, diagnostics_cfg, arguments)
+
+        // TODO(rameight): by calling the hvm binary, it does not work as expected
+        // since it fails to streamlining the VM result
+        // run_book(
+        //     book,
+        //     run_opts,
+        //     compile_opts,
+        //     diagnostics_cfg,
+        //     arguments,
+        //     "run",
+        // )
+    }
+
+    pub fn run_code_with_timers(
+        self: Arc<Self>,
+        code_id: &str,
+        // TODO(rameight): HVM2 doesn't enable entrypoint running yet.
+        // entrypoint: Option<&str>,
+        arguments: Option<Vec<Term>>,
+    ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
+        let book = self.books.get(code_id).expect("load book failed").clone();
         let run_opts = RunOpts {
             linear_readback: false,
             pretty: false,
@@ -67,7 +109,7 @@ impl SVM {
             repeated_bind: bend::diagnostics::Severity::Allow,
             recursion_cycle: bend::diagnostics::Severity::Allow,
         };
-        self.run_book(book, run_opts, compile_opts, diagnostics_cfg, arguments)
+        self.run_book(book, compile_opts, diagnostics_cfg, arguments)
 
         // TODO(rameight): by calling the hvm binary, it does not work as expected
         // since it fails to streamlining the VM result
@@ -81,10 +123,56 @@ impl SVM {
         // )
     }
 
+    fn run_book_with_timers(
+        self: Arc<Self>,
+        mut book: Book,
+        compile_opts: CompileOpts,
+        diagnostics_cfg: DiagnosticsConfig,
+        args: Option<Vec<Term>>,
+    ) -> (
+        Result<Option<(Term, String, Diagnostics)>, Diagnostics>,
+        (u128, u128, u128),
+    ) {
+        let (mut compilation_mrs, mut run_hvm_mrs, mut readback_mrs) = (0, 0, 0);
+
+        let now = Instant::now();
+        let CompileResult {
+            hvm_book: core_book,
+            labels,
+            diagnostics,
+        } = match compile_book(&mut book, compile_opts.clone(), diagnostics_cfg, args) {
+            Ok(r) => r,
+            Err(e) => return (Err(e), (0, 0, 0)),
+        };
+        eprint!("{diagnostics}");
+        compilation_mrs += now.elapsed().as_micros();
+
+        let now = Instant::now();
+        let (net, stats) = match Self::run_hvm(&core_book.build()) {
+            Ok(r) => r,
+            Err(e) => return (Err(e), (0, 0, 0)),
+        };
+        run_hvm_mrs += now.elapsed().as_micros();
+
+        let now = Instant::now();
+        let (term, diags) = readback_hvm_net(
+            &net,
+            &book,
+            &labels,
+            false, // linear_readback
+            compile_opts.adt_encoding,
+        );
+        readback_mrs += now.elapsed().as_micros();
+
+        (
+            Ok(Some((term, stats, diags))),
+            (compilation_mrs, run_hvm_mrs, readback_mrs),
+        )
+    }
+
     fn run_book(
         self: Arc<Self>,
         mut book: Book,
-        run_opts: RunOpts,
         compile_opts: CompileOpts,
         diagnostics_cfg: DiagnosticsConfig,
         args: Option<Vec<Term>>,
@@ -101,12 +189,49 @@ impl SVM {
             &net,
             &book,
             &labels,
-            run_opts.linear_readback,
+            true, // linear_readback,
             compile_opts.adt_encoding,
         );
 
         Ok(Some((term, stats, diags)))
     }
+
+    // fn run_book_c(
+    //     self: Arc<Self>,
+    //     mut book: Book,
+    //     run_opts: RunOpts,
+    //     compile_opts: CompileOpts,
+    //     diagnostics_cfg: DiagnosticsConfig,
+    //     args: Option<Vec<Term>>,
+    // ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
+    //     let CompileResult {
+    //         hvm_book: core_book,
+    //         labels,
+    //         diagnostics,
+    //     } = compile_book(&mut book, compile_opts.clone(), diagnostics_cfg, args)?;
+    //     eprint!("{diagnostics}");
+
+    //     let mut data: Vec<u8> = Vec::new();
+    //     _ = &core_book.build().to_buffer(&mut data);
+    //     let now = Instant::now();
+    //     unsafe {
+    //         hvm_c(data.as_mut_ptr() as *mut u32, true);
+    //     }
+    //     info!("hvm c elapsed_mrs: {}", now.elapsed().as_micros());
+
+    //     let now = Instant::now();
+    //     let (net, stats) = Self::run_hvm(&core_book.build())?;
+    //     let (term, diags) = readback_hvm_net(
+    //         &net,
+    //         &book,
+    //         &labels,
+    //         run_opts.linear_readback,
+    //         compile_opts.adt_encoding,
+    //     );
+    //     info!("hvm rs elapsed_mrs: {}", now.elapsed().as_micros());
+
+    //     Ok(Some((term, stats, diags)))
+    // }
 
     pub fn run_hvm(book: &hvm::hvm::Book) -> Result<(hvm::ast::Net, String), String> {
         // Initializes the global net
