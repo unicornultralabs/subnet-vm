@@ -71,7 +71,7 @@ async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
 
     alloc(tm.clone(), a, b).await;
 
-    make_move(tm, svm, 0).await;
+    info!("{:?}", make_move(tm, svm, 0).await);
     // query(tm.clone(), a, b);
 
     // transfer(tm.clone(), svm.clone(), a, b).await;
@@ -162,20 +162,12 @@ async fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
     );
 }
 
-async fn make_move(tm: Arc<SVMMemory>, svm: Arc<SVM>, aorb: u32) {
-    let now = Instant::now();
-
-    // let mut set = JoinSet::new();
-    // for i in (a + 1..=b).rev() {
-    //     let tm = tm.clone();
-    //     let svm = svm.clone();
-    //     set.spawn(async move {
-
+async fn make_move(tm: Arc<SVMMemory>, svm: Arc<SVM>, aorb: u32) -> Result<SVMPrimitives, String> {
     let from_key = format!("0x0");
     let to_key = format!("0x1");
     let from_key_vec = from_key.clone().as_bytes().to_vec();
     let to_key_vec = to_key.clone().as_bytes().to_vec();
-    if let Err(e) = retry_transaction(tm, |txn| {
+    match retry_transaction(tm, |txn| {
         let persona = match txn.read(from_key_vec.clone()) {
             Some(value) => value,
             None => return Err(format!("key={} does not exist", from_key)),
@@ -219,17 +211,16 @@ async fn make_move(tm: Arc<SVMMemory>, svm: Arc<SVM>, aorb: u32) {
             }
             Ok(None) => return Err(format!("svm execution failed err=none result")),
             Err(e) => return Err(format!("svm execution failed err={}", e)),
-        };
+        }
     }) {
-        error!("from_key={} err={}", from_key.clone(), e);
+        Ok(ret_val) => match ret_val {
+            Some(ret_val) => return Ok(ret_val),
+            None => return Err(format!("from_key={} err=must return", from_key.clone())),
+        },
+        Err(e) => {
+            return Err(format!("from_key={} err={}", from_key.clone(), e));
+        }
     }
-    // });
-    // }
-    // while let Some(_) = set.join_next().await {}
-    info!(
-        "finish transfer elapesed_microsec={}",
-        now.elapsed().as_micros()
-    );
 }
 
 async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
