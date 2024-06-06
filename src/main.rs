@@ -274,6 +274,7 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
     );
     {
         let mut stats_content = String::from("");
+        stats_content.push_str(&format!("i,j,vm_mrs,mem_mrs,backoff_mrs\n"));
         let stats = txs_timers.read().await;
         for (txid, timers) in stats.iter() {
             let i = txid >> 32;
