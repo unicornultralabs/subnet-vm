@@ -4,6 +4,7 @@ use crate::svm::{
 };
 use dashmap::DashMap;
 use std::{collections::HashMap, sync::Arc, thread::sleep, time::Duration};
+use tokio::time::Instant;
 
 #[derive(Clone)]
 pub struct SVMMemory {
@@ -112,5 +113,44 @@ where
                 sleep(Duration::from_micros(10)); // Simple backoff strategy
             }
         }
+    }
+}
+
+pub fn retry_transaction_with_timers<F>(
+    smem: Arc<SVMMemory>,
+    transaction_fn: F,
+) -> (Result<Option<SVMPrimitives>, String>, (u128, u128))
+where
+    F: Fn(&mut Transaction) -> Result<Option<SVMPrimitives>, String>,
+{
+    let mut fn_exec_mrs = 0;
+    let mut backoff_mrs = 0;
+
+    loop {
+        let mut txn = Transaction::new(&smem);
+        let now = Instant::now();
+        let ret_val = match transaction_fn(&mut txn) {
+            Ok(ret_val) => {
+                fn_exec_mrs += now.elapsed().as_micros();
+                ret_val
+            }
+            Err(e) => {
+                fn_exec_mrs += now.elapsed().as_micros();
+                return (
+                    Err(format!("transaction_fn execution failed err={}", e)),
+                    (fn_exec_mrs, backoff_mrs),
+                );
+            }
+        };
+
+        let now = Instant::now();
+        match txn.commit() {
+            Ok(_) => return (Ok(ret_val), (fn_exec_mrs, backoff_mrs)),
+            Err(_) => {
+                txn.rollback();
+                sleep(Duration::from_micros(10)); // Simple backoff strategy
+            }
+        }
+        backoff_mrs += now.elapsed().as_micros();
     }
 }
