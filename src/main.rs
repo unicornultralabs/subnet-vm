@@ -8,6 +8,7 @@ use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::{task::JoinSet, time::Instant};
 use tokio_tungstenite::{accept_async, WebSocketStream};
+
 pub mod block_stm;
 pub mod executor;
 pub mod svm;
@@ -21,12 +22,6 @@ struct SubmitTransaction {
     amount: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct QueryBalance {
-    code_hash: String,
-    address: String,
-}
-
 #[derive(Serialize)]
 struct ConfirmedTransaction {
     tx_hash: String,
@@ -34,6 +29,12 @@ struct ConfirmedTransaction {
     status: bool,
     ret_value: Option<SVMPrimitives>,
     errs: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct QueryBalance {
+    code_hash: String,
+    address: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -346,37 +347,42 @@ async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMem
                                 });
                             }
                             Message::QueryBalance(query) => {
-                                // tokio::spawn(async move {
-                                //     let mut send = send_clone.lock().await;
-                                //     let query_balance = query.clone();
-                                //     let key = query_balance.address.clone();
-                                //     let key_vec = key.clone().as_bytes().to_vec();
-                                //     let result = retry_transaction(tm_loop, |txn| {
-                                //         let value = match txn.read(key_vec.clone()) {
-                                //             Some(value) => value,
-                                //             None => return Err(format!("key={} does not exist", key)),
-                                //         };
-                                //         Ok(Some(value))
-                                //     });
-                                //     match result {
-                                //         Ok(ret_val) => {
-                                //             if let Ok(json_result) = serde_json::to_string(&ret_val) {
-                                //                 if let Err(e) = send.send(json_result.into()).await {
-                                //                     println!("failed to send query balance result: {}", e);
-                                //                 }
-                                //             } else {
-                                //                 if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
-                                //                     println!("failed to convert query balance result to json string: {}", e);
-                                //                 }
-                                //             }
-                                //         }
-                                //         Err(err) => {
-                                //             if let Err(e) = send.send(err.clone().into()).await {
-                                //                 println!("failed to send query balance error: {}", e);
-                                //             }
-                                //         }
-                                //     }
-                                // });
+                                tokio::spawn(async move {
+                                    let mut send = send_clone.lock().await;
+                                    let result = process_query_balance(query.clone(), tm_loop, svm_loop);
+                                    match result {
+                                        Ok(ret_val) => {
+                                            // transform to confirmed transaction
+                                            let confirmed_transaction = ConfirmedTransaction {
+                                                code_hash: query.code_hash,
+                                                tx_hash: "".into(),
+                                                ret_value: Some(ret_val),
+                                                status: true,
+                                                errs: None
+                                            };
+                                            if let Ok(json_result) = serde_json::to_string(&confirmed_transaction) {
+                                                if let Err(e) = send.send(json_result.into()).await {
+                                                    println!("failed to send query balance result: {}", e);
+                                                }
+                                            } else {
+                                                if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
+                                                    println!("failed to convert query balance result to json string: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            if let Err(e) = send.send(err.into()).await {
+                                                println!("failed to send query balance error: {}", e);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            _ => {
+                                let mut send = send_clone.lock().await;
+                                if let Err(e) = send.send("unsupported message".into()).await {
+                                    println!("failed to send unsupported message: {}", e);
+                                }
                             }
                         }
                     }
@@ -388,6 +394,8 @@ async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMem
             }
         }
     }
+    // Handle WebSocket disconnection
+    on_ws_disconnected(tm, 1, 1_000_000).await;
 }
 
 fn process_transaction(
@@ -449,47 +457,24 @@ fn process_query_balance(
     query: QueryBalance,
     tm: Arc<SVMMemory>,
     svm: Arc<SVM>,
-) -> Result<SVMPrimitives, std::string::String> {
-    let tm = tm.clone();
-    let svm = svm.clone();
+) -> Result<SVMPrimitives, String> {
     let key_vec = query.address.clone().as_bytes().to_vec();
-
-
-    let result = retry_transaction(tm, |txn| {
-        let value = match txn.read(key_vec.clone()) {
+    let result = retry_transaction(tm.clone(), |txn| {
+        let return_value = match txn.read(key_vec.clone()) {
             Some(value) => value,
-            None => return Err(format!("address={} does not exist", query.address)),
+            None => return Err(format!("key={} does not exist", query.address)),
         };
-        let amt = SVMPrimitives::U24(transaction.amount).to_term();
-
-        let args = {
-            Some(vec![
-                from_value.to_term(),
-                to_value.to_term(),
-                amt,
-            ])
-        };
-        match svm.clone().run_code(&query.code_hash, args) {
-            Ok(Some((term, _stats, _diags))) => {
-                let result = SVMPrimitives::from_term(term.clone());
-                match result {
-                    SVMPrimitives::Tup(ref els) => {
-                        let (from_val, to_val) = (els[0].clone(), els[1].clone());
-                        txn.write(from_key_vec.clone(), from_val);
-                        txn.write(to_key_vec.clone(), to_val);
-                        return Ok(Some(result));
-                    }
-                    _ => return Err("unexpected type of result".to_string()),
-                };
-            }
-            Ok(None) => Err("svm execution failed err=none result".to_string()),
-            Err(e) => Err(format!("svm execution failed err={}", e)),
-        }
+        // info!("key={} Result:{:?}", query.address, return_value);
+        Ok(Some(return_value))
     });
-
     match result {
         Ok(Some(res)) => Ok(res),
-        Ok(None) => Err(format!("from_key={} did not produce a result", from_key)),
-        Err(e) => Err(format!("from_key={} err={}", from_key, e)),
+        Ok(None) => Err(format!("key={} did not produce a result", query.address)),
+        Err(e) => Err(format!("key={} err={}", query.address, e)),
     }
+}
+
+async fn on_ws_disconnected(tm: Arc<SVMMemory>, a:u32,  b: u32) {
+    println!("WebSocket connection closed or disconnected, reverting memory changes...");
+    alloc(tm.clone(), a, b).await;
 }
