@@ -42,10 +42,16 @@ struct QueryBalance {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct MakeMove {
+    address: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 enum Message {
     SubmitTransaction(SubmitTransaction),
     QueryBalance(QueryBalance),
+    MakeMove(MakeMove),
 }
 
 #[tokio::main]
@@ -56,13 +62,13 @@ async fn main() {
     let svm = Arc::new(SVM::new());
     let addr = "0.0.0.0:9001";
 
-    let a = 1;
+    let a = 0;
     let b = 1_000_000;
 
     // allocate memory for testing purposes
-    // alloc(tm.clone(), a, b).await;
-    run_example(tm.clone(), svm.clone()).await;
-    // run_ws(&addr, tm, svm).await;
+    alloc(tm.clone(), a, b).await;
+    // run_example(tm.clone(), svm.clone()).await;
+    run_ws(&addr, tm, svm).await;
 }
 
 async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
@@ -191,7 +197,6 @@ async fn make_move(tm: Arc<SVMMemory>, svm: Arc<SVM>, aorb: u32) -> Result<SVMPr
                 //     from_key.clone(),
                 //     term.display_pretty(0)
                 // );
-
                 let result = SVMPrimitives::from_term(term.clone());
                 match result {
                     SVMPrimitives::Tup(ref els) => {
@@ -499,6 +504,52 @@ async fn handle_connection(
                                             // transform to confirmed transaction
                                             let confirmed_transaction = ConfirmedTransaction {
                                                 code_hash: query.code_hash,
+                                                tx_hash: "".into(),
+                                                ret_value: Some(ret_val),
+                                                status: true,
+                                                errs: None,
+                                            };
+                                            if let Ok(json_result) =
+                                                serde_json::to_string(&confirmed_transaction)
+                                            {
+                                                if let Err(e) = send.send(json_result.into()).await
+                                                {
+                                                    println!(
+                                                        "failed to send query balance result: {}",
+                                                        e
+                                                    );
+                                                }
+                                            } else {
+                                                if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
+                                                    println!("failed to convert query balance result to json string: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            if let Err(e) = send.send(err.into()).await {
+                                                println!(
+                                                    "failed to send query balance error: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            Message::MakeMove(m) => {
+                                tokio::spawn(async move {
+                                    let mut a_or_b = 0;
+                                    match m.address == format!("0x0") {
+                                        true => a_or_b = 0,
+                                        false => a_or_b = 1,
+                                    }
+                                    let mut send = send_clone.lock().await;
+                                    let result = make_move(tm_loop, svm_loop, a_or_b).await;
+                                    match result {
+                                        Ok(ret_val) => {
+                                            // transform to confirmed transaction
+                                            let confirmed_transaction = ConfirmedTransaction {
+                                                code_hash: "0xduangua".into(),
                                                 tx_hash: "".into(),
                                                 ret_value: Some(ret_val),
                                                 status: true,
