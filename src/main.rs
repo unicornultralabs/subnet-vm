@@ -43,7 +43,9 @@ struct QueryBalance {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct MakeMove {
+    code_hash: String,
     address: String,
+    step: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
