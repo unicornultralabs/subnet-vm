@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
+use svm::builtins::{DUANGUA_CODE, DUANGUA_CODE_ID};
 use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
@@ -60,19 +61,21 @@ async fn main() {
 
     // allocate memory for testing purposes
     // alloc(tm.clone(), a, b).await;
-    // run_example(tm.clone(), svm.clone()).await;
-    run_ws(&addr, tm, svm).await;
+    run_example(tm.clone(), svm.clone()).await;
+    // run_ws(&addr, tm, svm).await;
 }
 
 async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
-    let a = 1;
+    let a = 0;
     let b = 100;
 
     alloc(tm.clone(), a, b).await;
+
+    make_move(tm, svm, 0).await;
     // query(tm.clone(), a, b);
 
     // transfer(tm.clone(), svm.clone(), a, b).await;
-    reverse_transfer(tm.clone(), svm.clone(), a, b).await;
+    // reverse_transfer(tm.clone(), svm.clone(), a, b).await;
 
     // query(tm.clone(), a, b);
 }
@@ -86,7 +89,7 @@ async fn alloc(tm: Arc<SVMMemory>, a: u32, b: u32) {
             let key = format!("0x{}", i);
             let key_vec = key.clone().as_bytes().to_vec();
             if let Err(e) = retry_transaction(tm, |txn| {
-                txn.write(key_vec.clone(), SVMPrimitives::U24(i));
+                txn.write(key_vec.clone(), SVMPrimitives::U24(0));
                 Ok(None)
             }) {
                 error!("key={} err={}", key.clone(), e);
@@ -153,6 +156,76 @@ async fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
         });
     }
     while let Some(_) = set.join_next().await {}
+    info!(
+        "finish transfer elapesed_microsec={}",
+        now.elapsed().as_micros()
+    );
+}
+
+async fn make_move(tm: Arc<SVMMemory>, svm: Arc<SVM>, aorb: u32) {
+    let now = Instant::now();
+
+    // let mut set = JoinSet::new();
+    // for i in (a + 1..=b).rev() {
+    //     let tm = tm.clone();
+    //     let svm = svm.clone();
+    //     set.spawn(async move {
+
+    let from_key = format!("0x0");
+    let to_key = format!("0x1");
+    let from_key_vec = from_key.clone().as_bytes().to_vec();
+    let to_key_vec = to_key.clone().as_bytes().to_vec();
+    if let Err(e) = retry_transaction(tm, |txn| {
+        let persona = match txn.read(from_key_vec.clone()) {
+            Some(value) => value,
+            None => return Err(format!("key={} does not exist", from_key)),
+        };
+        let personb = match txn.read(to_key_vec.clone()) {
+            Some(value) => value,
+            None => return Err(format!("key={} does not exist", to_key)),
+        };
+
+        let args = Some(vec![
+            persona.to_term(),
+            personb.to_term(),
+            SVMPrimitives::U24(aorb).to_term(),
+            SVMPrimitives::U24(1).to_term(),
+        ]);
+        match svm.clone().run_code(DUANGUA_CODE_ID, args) {
+            Ok(Some((term, _stats, _diags))) => {
+                // eprint!("i={} {diags}", i);
+                // println!(
+                //     "from_key={} Result:\n{}",
+                //     from_key.clone(),
+                //     term.display_pretty(0)
+                // );
+
+                let result = SVMPrimitives::from_term(term.clone());
+                match result {
+                    SVMPrimitives::Tup(ref els) => {
+                        let (person_step, _) = (els[0].clone(), els[1].clone());
+                        if aorb == 0 {
+                            txn.write(from_key_vec.clone(), person_step);
+                        } else {
+                            txn.write(to_key_vec.clone(), person_step);
+                        }
+                        println!("{:?}", els[1]);
+                        return Ok(Some(result));
+                    }
+                    unknown => {
+                        return Err(format!("unexpected type of result unknown={:?}", unknown))
+                    }
+                };
+            }
+            Ok(None) => return Err(format!("svm execution failed err=none result")),
+            Err(e) => return Err(format!("svm execution failed err={}", e)),
+        };
+    }) {
+        error!("from_key={} err={}", from_key.clone(), e);
+    }
+    // });
+    // }
+    // while let Some(_) = set.join_next().await {}
     info!(
         "finish transfer elapesed_microsec={}",
         now.elapsed().as_micros()
@@ -428,7 +501,8 @@ async fn handle_connection(
                             Message::QueryBalance(query) => {
                                 tokio::spawn(async move {
                                     let mut send = send_clone.lock().await;
-                                    let result = process_query_balance(query.clone(), tm_loop, svm_loop);
+                                    let result =
+                                        process_query_balance(query.clone(), tm_loop, svm_loop);
                                     match result {
                                         Ok(ret_val) => {
                                             // transform to confirmed transaction
@@ -437,11 +511,17 @@ async fn handle_connection(
                                                 tx_hash: "".into(),
                                                 ret_value: Some(ret_val),
                                                 status: true,
-                                                errs: None
+                                                errs: None,
                                             };
-                                            if let Ok(json_result) = serde_json::to_string(&confirmed_transaction) {
-                                                if let Err(e) = send.send(json_result.into()).await {
-                                                    println!("failed to send query balance result: {}", e);
+                                            if let Ok(json_result) =
+                                                serde_json::to_string(&confirmed_transaction)
+                                            {
+                                                if let Err(e) = send.send(json_result.into()).await
+                                                {
+                                                    println!(
+                                                        "failed to send query balance result: {}",
+                                                        e
+                                                    );
                                                 }
                                             } else {
                                                 if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
@@ -451,7 +531,10 @@ async fn handle_connection(
                                         }
                                         Err(err) => {
                                             if let Err(e) = send.send(err.into()).await {
-                                                println!("failed to send query balance error: {}", e);
+                                                println!(
+                                                    "failed to send query balance error: {}",
+                                                    e
+                                                );
                                             }
                                         }
                                     }
@@ -547,7 +630,7 @@ fn process_query_balance(
     }
 }
 
-async fn on_ws_disconnected(tm: Arc<SVMMemory>, a:u32,  b: u32) {
+async fn on_ws_disconnected(tm: Arc<SVMMemory>, a: u32, b: u32) {
     println!("WebSocket connection closed or disconnected, reverting memory changes...");
     alloc(tm.clone(), a, b).await;
 }
