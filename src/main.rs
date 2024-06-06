@@ -59,7 +59,7 @@ async fn main() {
     let b = 1_000_000;
 
     // allocate memory for testing purposes
-    // alloc(tm.clone(), a, b).await;
+    alloc(tm.clone(), a, b).await;
     // run_example(tm.clone(), svm.clone()).await;
     run_ws(&addr, tm, svm).await;
 }
