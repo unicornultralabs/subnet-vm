@@ -129,7 +129,7 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 [[package]]
 name = "bend-lang"
 version = "0.2.29"
-source = "git+https://github.com/unicornultralabs/Bend?branch=main#802221feb74a7de5eb72c4e3c1367048d4ffbfa8"
+source = "git+https://github.com/unicornultralabs/Bend?branch=main#13673371daea265907ca8dda8c42b6725b9de2a7"
 dependencies = [
  "TSPL",
  "clap",
