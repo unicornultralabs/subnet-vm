@@ -7,7 +7,7 @@ use std::sync::Arc;
 use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::{task::JoinSet, time::Instant};
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::{accept_async, WebSocketStream};
 pub mod block_stm;
 pub mod executor;
 pub mod svm;
@@ -249,14 +249,22 @@ async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     while let Ok((stream, _)) = listener.accept().await {
         let tm = tm.clone();
         let svm = svm.clone();
-        tokio::spawn(handle_connection(stream, tm, svm));
+
+        tokio::spawn(async move {
+            match accept_async(stream).await {
+                Ok(stream) => {
+                    tokio::spawn(handle_connection(stream, tm, svm));
+                }
+                Err(e) => {
+                    error!("Error during the websocket handshake occurred: {}", e);
+                }
+            }
+        });
+        // tokio::spawn(handle_connection(stream, tm, svm));
     }
 }
 
-async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
-    let ws_stream = accept_async(raw_stream)
-        .await
-        .expect("Error during the websocket handshake occurred");
+async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     let (write, mut read) = ws_stream.split();
     let ws_send = Arc::new(Mutex::new(write));
 
@@ -265,6 +273,7 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
             Ok(msg) => {
                 if msg.is_text() || msg.is_binary() {
                     let text = msg.clone().into_text().unwrap();
+                    info!("Received message: {}", text);
                     // let parsed: Vec<Message> = serde_json::from_str(&text).unwrap();
                     let send_clone = Arc::clone(&ws_send);
                     if let Ok(message) = serde_json::from_str::<Message>(&text) {
