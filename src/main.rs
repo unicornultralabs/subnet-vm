@@ -14,19 +14,20 @@ pub mod svm;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SubmitTransaction {
-    code_hash: String,
     tx_hash: String,
+    code_hash: String,
     from: String,
     to: String,
     amount: u32,
 }
 
-
 #[derive(Serialize)]
-struct ConfirmedTransaction{
-    code_hash: String,
+struct ConfirmedTransaction {
     tx_hash: String,
-    ret_value: SVMPrimitives,
+    code_hash: String,
+    status: bool,
+    ret_value: Option<SVMPrimitives>,
+    errs: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -273,20 +274,28 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                         match message {
                             Message::SubmitTransaction(transaction) => {
                                 tokio::spawn(async move {
+                                    let mut send = send_clone.lock().await;
                                     let result =
                                         process_transaction(transaction.clone(), tm_loop, svm_loop);
-                                    let mut send = send_clone.lock().await;
                                     match result {
                                         Ok(ret_val) => {
-                                            if let Ok(_json_result) = serde_json::to_string(&ret_val) {
+                                            if let Ok(_json_result) =
+                                                serde_json::to_string(&ret_val)
+                                            {
                                                 // transform to confirmed transaction
                                                 let confirmed_transaction = ConfirmedTransaction {
                                                     code_hash: transaction.code_hash,
                                                     tx_hash: transaction.tx_hash,
-                                                    ret_value: ret_val,
+                                                    ret_value: Some(ret_val),
+                                                    status: true,
+                                                    errs: None
                                                 };
-                                                if let Ok(json_result) = serde_json::to_string(&confirmed_transaction) {
-                                                    if let Err(e) = send.send(json_result.into()).await {
+                                                if let Ok(json_result) =
+                                                    serde_json::to_string(&confirmed_transaction)
+                                                {
+                                                    if let Err(e) =
+                                                        send.send(json_result.into()).await
+                                                    {
                                                         println!("failed to send confirmed transaction: {}", e);
                                                     }
                                                 } else {
@@ -301,11 +310,22 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                                             }
                                         }
                                         Err(err) => {
-                                            if let Err(e) = send.send(err.clone().into()).await {
-                                                println!(
-                                                    "svm err: {}, ws send message err: {}",
-                                                    err, e
-                                                );
+                                            let confirmed_tx = ConfirmedTransaction {
+                                                tx_hash: transaction.tx_hash,
+                                                code_hash: transaction.code_hash,
+                                                status: false,
+                                                ret_value: None,
+                                                errs: Some(err.clone().into()),
+                                            };
+                                            // send confirmed transaction
+                                            if let Ok(json_result) = serde_json::to_string(&confirmed_tx) {
+                                                if let Err(e) = send.send(json_result.into()).await {
+                                                    println!("failed to send confirmed transaction: {}", e);
+                                                }
+                                            } else {
+                                                if let Err(e) = send.send("failed to convert confirmed transaction to json string".into()).await {
+                                                    println!("failed to convert confirmed transaction to json string: {}", e);
+                                                }
                                             }
                                         }
                                     }
@@ -348,7 +368,13 @@ fn process_transaction(
         };
         let amt = SVMPrimitives::U24(transaction.amount).to_term();
 
-        let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
+        let args = {
+            Some(vec![
+                from_value.to_term(),
+                to_value.to_term(),
+                amt,
+            ])
+        };
         match svm.clone().run_code(&transaction.code_hash, args) {
             Ok(Some((term, _stats, _diags))) => {
                 let result = SVMPrimitives::from_term(term.clone());
