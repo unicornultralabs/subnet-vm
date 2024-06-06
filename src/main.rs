@@ -60,8 +60,8 @@ async fn main() {
 
     // allocate memory for testing purposes
     // alloc(tm.clone(), a, b).await;
-    run_example(tm.clone(), svm.clone()).await;
-    // run_ws(&addr, tm, svm).await;
+    // run_example(tm.clone(), svm.clone()).await;
+    run_ws(&addr, tm, svm).await;
 }
 
 async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
