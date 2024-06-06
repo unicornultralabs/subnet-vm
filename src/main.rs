@@ -1,11 +1,14 @@
-use block_stm::svm_memory::{retry_transaction, SVMMemory};
+use block_stm::svm_memory::{retry_transaction, retry_transaction_with_timers, SVMMemory};
 use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
 use std::sync::Arc;
 use svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 use tokio::{task::JoinSet, time::Instant};
 use tokio_tungstenite::{accept_async, WebSocketStream};
 pub mod block_stm;
@@ -48,9 +51,9 @@ async fn main() {
     let b = 1_000_000;
 
     // allocate memory for testing purposes
-    alloc(tm.clone(), a, b).await;
-    // run_example(tm.clone(), svm.clone()).await;
-    run_ws(&addr, tm, svm).await;
+    // alloc(tm.clone(), a, b).await;
+    run_example(tm.clone(), svm.clone()).await;
+    // run_ws(&addr, tm, svm).await;
 }
 
 async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
@@ -58,12 +61,12 @@ async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     let b = 100;
 
     alloc(tm.clone(), a, b).await;
-    query(tm.clone(), a, b);
+    // query(tm.clone(), a, b);
 
     // transfer(tm.clone(), svm.clone(), a, b).await;
     reverse_transfer(tm.clone(), svm.clone(), a, b).await;
 
-    query(tm.clone(), a, b);
+    // query(tm.clone(), a, b);
 }
 
 async fn alloc(tm: Arc<SVMMemory>, a: u32, b: u32) {
@@ -151,15 +154,20 @@ async fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
 async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
     let now = Instant::now();
     let mut set = JoinSet::new();
+    let txs_timers: Arc<RwLock<HashMap<u64, (u128, u128)>>> = Arc::new(RwLock::new(HashMap::new()));
 
     let mut total_txs = 0;
 
     for i in (a + 1..=b).rev() {
+        let txs_timers = txs_timers.clone();
         let svm = svm.clone();
         let tm = tm.clone();
         let from_key = format!("0x{}", i);
         let from_key_vec = from_key.as_bytes().to_vec();
         for j in a..i {
+            let txs_timers = txs_timers.clone();
+            let txid: u64 = ((i as u64) << 32) + (j as u64);
+
             total_txs += 1;
 
             let tm = tm.clone();
@@ -170,7 +178,7 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
             let to_key_vec = to_key.as_bytes().to_vec();
 
             set.spawn(async move {
-                if let Err(e) = retry_transaction(tm, |txn| {
+                let (result, timers) = retry_transaction_with_timers(tm, |txn| {
                     let from_value = match txn.read(from_key_vec.clone()) {
                         Some(value) => value,
                         None => return Err(format!("key={} does not exist", from_key)),
@@ -205,9 +213,13 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
                         Ok(None) => return Err(format!("svm execution failed err=none result")),
                         Err(e) => return Err(format!("svm execution failed err={}", e)),
                     };
-                }) {
+                });
+                if let Err(e) = result {
                     error!("from_key={} err={}", from_key.clone(), e);
                 }
+                tokio::spawn(async move {
+                    txs_timers.write().await.insert(txid, timers);
+                });
             });
         }
     }
@@ -217,6 +229,16 @@ async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
         total_txs,
         now.elapsed().as_micros()
     );
+    {
+        let mut stats_content = String::from("");
+        let stats = txs_timers.read().await;
+        for (txid, timers) in stats.iter() {
+            let i = txid >> 32;
+            let j = (txid << 32) >> 32;
+            stats_content.push_str(&format!("{},{},{},{}\n", i, j, timers.0, timers.1));
+        }
+        _ = fs::write("stat.svm", &stats_content);
+    }
 }
 
 fn query(tm: Arc<SVMMemory>, a: u32, b: u32) {
@@ -265,7 +287,11 @@ async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     }
 }
 
-async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
+async fn handle_connection(
+    ws_stream: WebSocketStream<TcpStream>,
+    tm: Arc<SVMMemory>,
+    svm: Arc<SVM>,
+) {
     let (write, mut read) = ws_stream.split();
     let ws_send = Arc::new(Mutex::new(write));
 
@@ -298,7 +324,7 @@ async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMem
                                                     tx_hash: transaction.tx_hash,
                                                     ret_value: Some(ret_val),
                                                     status: true,
-                                                    errs: None
+                                                    errs: None,
                                                 };
                                                 if let Ok(json_result) =
                                                     serde_json::to_string(&confirmed_transaction)
@@ -328,9 +354,15 @@ async fn handle_connection(ws_stream: WebSocketStream<TcpStream>, tm: Arc<SVMMem
                                                 errs: Some(err.clone().into()),
                                             };
                                             // send confirmed transaction
-                                            if let Ok(json_result) = serde_json::to_string(&confirmed_tx) {
-                                                if let Err(e) = send.send(json_result.into()).await {
-                                                    println!("failed to send confirmed transaction: {}", e);
+                                            if let Ok(json_result) =
+                                                serde_json::to_string(&confirmed_tx)
+                                            {
+                                                if let Err(e) = send.send(json_result.into()).await
+                                                {
+                                                    println!(
+                                                        "failed to send confirmed transaction: {}",
+                                                        e
+                                                    );
                                                 }
                                             } else {
                                                 if let Err(e) = send.send("failed to convert confirmed transaction to json string".into()).await {
@@ -378,13 +410,7 @@ fn process_transaction(
         };
         let amt = SVMPrimitives::U24(transaction.amount).to_term();
 
-        let args = {
-            Some(vec![
-                from_value.to_term(),
-                to_value.to_term(),
-                amt,
-            ])
-        };
+        let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
         match svm.clone().run_code(&transaction.code_hash, args) {
             Ok(Some((term, _stats, _diags))) => {
                 let result = SVMPrimitives::from_term(term.clone());
