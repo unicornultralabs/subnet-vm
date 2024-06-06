@@ -119,30 +119,55 @@ where
 pub fn retry_transaction_with_timers<F>(
     smem: Arc<SVMMemory>,
     transaction_fn: F,
-) -> (Result<Option<SVMPrimitives>, String>, (u128, u128, u128))
+) -> (
+    Result<Option<SVMPrimitives>, String>,
+    ((u128, u128, u128), u128, u128), // (vm) mem backoff
+)
 where
-    F: Fn(&mut Transaction) -> (Result<Option<SVMPrimitives>, String>, (u128, u128)),
+    F: Fn(
+        &mut Transaction,
+    ) -> (
+        Result<Option<SVMPrimitives>, String>,
+        ((u128, u128, u128), u128),
+    ),
 {
-    let (mut vm_mrs, mut mem_mrs, mut backoff_mrs) = (0, 0, 0);
+    let (mut compilation_mrs, mut run_hvm_mrs, mut readback_mrs, mut mem_mrs, mut backoff_mrs) =
+        (0, 0, 0, 0, 0);
 
     loop {
         let mut txn = Transaction::new(&smem);
-        let (ret_val, (vm_time, mem_time)) = transaction_fn(&mut txn);
-        vm_mrs += vm_time;
+        let (ret_val, ((compilation_time, run_hvm_time, readback_time), mem_time)) =
+            transaction_fn(&mut txn);
+        compilation_mrs += compilation_time;
+        run_hvm_mrs += run_hvm_time;
+        readback_mrs += readback_time;
         mem_mrs += mem_time;
         let ret_val = match ret_val {
             Ok(ret_val) => ret_val,
             Err(e) => {
                 return (
                     Err(format!("transaction_fn execution failed err={}", e)),
-                    (vm_mrs, mem_mrs, backoff_mrs),
+                    (
+                        (compilation_mrs, run_hvm_mrs, readback_mrs),
+                        mem_mrs,
+                        backoff_mrs,
+                    ),
                 );
             }
         };
 
         let now = Instant::now();
         match txn.commit() {
-            Ok(_) => return (Ok(ret_val), (vm_mrs, mem_mrs, backoff_mrs)),
+            Ok(_) => {
+                return (
+                    Ok(ret_val),
+                    (
+                        (compilation_mrs, run_hvm_mrs, readback_mrs),
+                        mem_mrs,
+                        backoff_mrs,
+                    ),
+                )
+            }
             Err(_) => {
                 txn.rollback();
                 sleep(Duration::from_micros(10)); // Simple backoff strategy
