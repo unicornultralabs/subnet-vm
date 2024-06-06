@@ -14,8 +14,8 @@ pub mod svm;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SubmitTransaction {
-    tx_hash: String,
     code_hash: String,
+    tx_hash: String,
     from: String,
     to: String,
     amount: u32,
@@ -24,6 +24,7 @@ struct SubmitTransaction {
 
 #[derive(Serialize)]
 struct ConfirmedTransaction{
+    code_hash: String,
     tx_hash: String,
     ret_value: SVMPrimitives,
 }
@@ -280,6 +281,7 @@ async fn handle_connection(raw_stream: TcpStream, tm: Arc<SVMMemory>, svm: Arc<S
                                             if let Ok(_json_result) = serde_json::to_string(&ret_val) {
                                                 // transform to confirmed transaction
                                                 let confirmed_transaction = ConfirmedTransaction {
+                                                    code_hash: transaction.code_hash,
                                                     tx_hash: transaction.tx_hash,
                                                     ret_value: ret_val,
                                                 };
