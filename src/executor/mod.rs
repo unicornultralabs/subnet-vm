@@ -1,10 +1,13 @@
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
 use crate::svm::{primitive_types::SVMPrimitives, svm::SVM};
 use bend::fun::Term;
+use log::error;
+use redis::{DPNRedisKey, RedisService};
 use std::sync::Arc;
 use types::TxBody;
 
 pub mod types;
+pub mod redis;
 
 pub fn process_tx(
     tx_body: TxBody,
@@ -13,6 +16,8 @@ pub fn process_tx(
 ) -> Result<SVMPrimitives, std::string::String> {
     let tm = tm.clone();
     let svm = svm.clone();
+
+    let redis_svc = Arc::new(RedisService::new("redis://:dpn@localhost:6379".to_string()).unwrap());
 
     let result = retry_transaction(tm, |txn| {
         let mut objects = vec![];
@@ -40,6 +45,14 @@ pub fn process_tx(
                         let modified_objs = els.clone();
                         for (index, obj_hash) in tx_body.objs.iter().enumerate() {
                             txn.write(obj_hash.as_bytes().to_vec(), modified_objs[index].clone());
+                            if let Ok(svm_primitive_json) = serde_json::to_string(&modified_objs[index].clone()) {
+                                let (k, f) = DPNRedisKey::get_vm_kf(obj_hash.as_bytes().to_vec());
+                                if let Err(e) = Arc::clone(&redis_svc).hset(k, f, svm_primitive_json) {
+                                    error!("failed to set svm_primitive_json err={}", e)
+                                };
+                            } else {
+                                error!("failed when parse svm primitive to string");
+                            }
                         }
                         return Ok(result);
                     }
