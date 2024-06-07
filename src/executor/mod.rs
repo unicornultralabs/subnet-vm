@@ -1,6 +1,7 @@
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
 use crate::svm::{primitive_types::SVMPrimitives, svm::SVM};
 use bend::fun::Term;
+use log::info;
 use std::sync::Arc;
 use types::TxBody;
 
@@ -32,6 +33,7 @@ pub fn process_tx(
         let args: Vec<Term> = args.iter().map(|arg| arg.to_term()).collect();
         match svm.clone().run_code(&tx_body.code_hash, Some(args)) {
             Ok((term, _stats, _diags)) => {
+                info!("{:#?}", term.clone());
                 let result = SVMPrimitives::from_term(term.clone());
                 match result {
                     SVMPrimitives::Tup(ref els) => {

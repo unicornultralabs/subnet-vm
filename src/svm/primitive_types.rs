@@ -22,6 +22,7 @@ impl SVMPrimitives {
     }
 
     pub fn from_term(term: Term) -> Self {
+        let term_c = term.clone();
         match term {
             Term::Num { val: U24(inner) } => Self::U24(inner),
             Term::Fan {
@@ -37,8 +38,9 @@ impl SVMPrimitives {
                         .collect(),
                 )
             }
+            // Term::Era {},
             unsupported => {
-                error!("unsupported term {:#?}", unsupported.clone());
+                error!("unsupported term {:#?}", term_c.clone());
                 unsupported.display_pretty(0);
                 todo!("unsupported term");
             }

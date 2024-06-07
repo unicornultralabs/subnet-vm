@@ -102,7 +102,6 @@ async fn handle_connection(
                 info!("Received message: {:?}", message);
                 match message {
                     Message::SubmitTx(tx_body) => {
-                        info!("{:#?}", tx_body.clone());
                         let mut send = send_clone.lock().await;
                         let tx_result = match process_tx(tx_body.clone(), tm_loop, svm_loop) {
                             Ok(ret_val) => TxResult {
@@ -178,7 +177,6 @@ fn process_query_balance(query: QueryBalance, tm: Arc<SVMMemory>) -> Result<SVMP
             Some(value) => value,
             None => return Err(format!("key={} does not exist", query.address)),
         };
-        // info!("key={} Result:{:?}", query.address, return_value);
         Ok(return_value)
     })
 }
