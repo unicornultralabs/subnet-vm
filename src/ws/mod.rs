@@ -1,6 +1,7 @@
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
 use crate::examples::alloc::alloc;
 use crate::examples::make_move::make_move;
+use crate::executor::types::TxBody;
 use crate::svm::{primitive_types::SVMPrimitives, svm::SVM};
 use bend::fun::Term;
 use futures::lock::Mutex;
@@ -10,9 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, WebSocketStream};
-use types::TxBody;
-
-pub mod types;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SubmitTransaction {
@@ -311,56 +309,6 @@ fn process_transaction(
     match result {
         Ok(res) => Ok(res),
         Err(e) => Err(format!("from_key={} err={}", from_key, e)),
-    }
-}
-
-fn process_tx(
-    tx_body: TxBody,
-    tm: Arc<SVMMemory>,
-    svm: Arc<SVM>,
-) -> Result<SVMPrimitives, std::string::String> {
-    let tm = tm.clone();
-    let svm = svm.clone();
-
-    let result = retry_transaction(tm, |txn| {
-        let mut objects = vec![];
-        for obj_hash in tx_body.objs.clone() {
-            let object = match txn.read(obj_hash.as_bytes().to_vec()) {
-                Some(object) => object,
-                None => return Err(format!("key={} does not exist", obj_hash)),
-            };
-            objects.push(object)
-        }
-        let mut args = objects;
-        args.extend_from_slice(&tx_body.args);
-
-        // due to limitations of HVM, we cannot read data from this code
-        // however, we can feed the data from arguments
-        // so arguments of main is the thing we want to modify PLUS the actual arguments.
-        let args: Vec<Term> = args.iter().map(|arg| arg.to_term()).collect();
-        match svm.clone().run_code(&tx_body.code_hash, Some(args)) {
-            Ok((term, _stats, _diags)) => {
-                let result = SVMPrimitives::from_term(term.clone());
-                match result {
-                    SVMPrimitives::Tup(ref els) => {
-                        // VM always returned the (un)modified objects as in the order
-                        // of receiving in input. We write back to SVMMemmory.
-                        let modified_objs = els.clone();
-                        for (index, obj_hash) in tx_body.objs.iter().enumerate() {
-                            txn.write(obj_hash.as_bytes().to_vec(), modified_objs[index].clone());
-                        }
-                        return Ok(result);
-                    }
-                    _ => return Err("unexpected type of result".to_string()),
-                };
-            }
-            Err(e) => Err(format!("svm execution failed err={}", e)),
-        }
-    });
-
-    match result {
-        Ok(res) => Ok(res),
-        Err(e) => Err(e),
     }
 }
 
