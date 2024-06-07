@@ -1,5 +1,6 @@
 use crate::examples::run_example;
 use block_stm::svm_memory::SVMMemory;
+use examples::alloc;
 use std::sync::Arc;
 use svm::svm::SVM;
 
@@ -17,6 +18,8 @@ async fn main() {
     let svm = Arc::new(SVM::new());
     let addr = "0.0.0.0:9001";
 
-    run_example(tm.clone(), svm.clone()).await;
-    // ws::run_ws(&addr, tm, svm).await;
+    // run_example(tm.clone(), svm.clone()).await;
+    alloc::alloc_incremental(tm.clone(), 1, 1_000_000).await;
+
+    ws::run_ws(&addr, tm, svm).await;
 }
