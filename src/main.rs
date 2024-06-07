@@ -1,8 +1,7 @@
 use block_stm::svm_memory::{retry_transaction, retry_transaction_with_timers, SVMMemory};
-use futures::lock::Mutex;
-use futures::{SinkExt, StreamExt};
+use futures::{lock::Mutex,SinkExt, StreamExt};
 use log::{error, info};
-use serde::{Deserialize, Serialize};
+use types::{ConfirmedTransaction, QueryBalance, SubmitTransaction, WsMessage};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
@@ -16,45 +15,8 @@ use tokio_tungstenite::{accept_async, WebSocketStream};
 pub mod block_stm;
 pub mod executor;
 pub mod svm;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct SubmitTransaction {
-    tx_hash: String,
-    code_hash: String,
-    from: String,
-    to: String,
-    amount: u32,
-}
-
-#[derive(Serialize)]
-struct ConfirmedTransaction {
-    tx_hash: String,
-    code_hash: String,
-    status: bool,
-    ret_value: Option<SVMPrimitives>,
-    errs: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct QueryBalance {
-    code_hash: String,
-    address: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct MakeMove {
-    code_hash: String,
-    address: String,
-    step: u32,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
-enum Message {
-    SubmitTransaction(SubmitTransaction),
-    QueryBalance(QueryBalance),
-    MakeMove(MakeMove),
-}
+pub mod web_socket;
+pub mod types;
 
 #[tokio::main]
 async fn main() {
@@ -427,11 +389,11 @@ async fn handle_connection(
                     let text = msg.clone().into_text().unwrap();
                     // info!("Received message: {}", text);
                     let send_clone = Arc::clone(&ws_send);
-                    if let Ok(message) = serde_json::from_str::<Message>(&text) {
+                    if let Ok(message) = serde_json::from_str::<WsMessage>(&text) {
                         let tm_loop = Arc::clone(&tm);
                         let svm_loop = Arc::clone(&svm);
                         match message {
-                            Message::SubmitTransaction(transaction) => {
+                            WsMessage::SubmitTransaction(transaction) => {
                                 tokio::spawn(async move {
                                     let mut send = send_clone.lock().await;
                                     let result =
@@ -496,11 +458,11 @@ async fn handle_connection(
                                     }
                                 });
                             }
-                            Message::QueryBalance(query) => {
+                            WsMessage::QueryBalance(query) => {
                                 tokio::spawn(async move {
                                     let mut send = send_clone.lock().await;
                                     let result =
-                                        process_query_balance(query.clone(), tm_loop, svm_loop);
+                                        process_query_balance(query.clone(), tm_loop);
                                     match result {
                                         Ok(ret_val) => {
                                             // transform to confirmed transaction
@@ -538,7 +500,7 @@ async fn handle_connection(
                                     }
                                 });
                             }
-                            Message::MakeMove(m) => {
+                            WsMessage::MakeMove(m) => {
                                 tokio::spawn(async move {
                                     let mut a_or_b = 0;
                                     match m.address == format!("0x0") {
@@ -656,7 +618,6 @@ fn process_transaction(
 fn process_query_balance(
     query: QueryBalance,
     tm: Arc<SVMMemory>,
-    svm: Arc<SVM>,
 ) -> Result<SVMPrimitives, String> {
     let key_vec = query.address.clone().as_bytes().to_vec();
     let result = retry_transaction(tm.clone(), |txn| {
