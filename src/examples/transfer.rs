@@ -1,4 +1,6 @@
-use crate::block_stm::svm_memory::{retry_transaction, retry_transaction_with_timers, SVMMemory};
+use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
+use crate::executor::process_tx;
+use crate::executor::types::TxBody;
 use crate::svm::{builtins::TRANSFER_CODE_ID, primitive_types::SVMPrimitives, svm::SVM};
 use log::{error, info};
 use std::collections::HashMap;
@@ -74,103 +76,30 @@ pub async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32)
     let mut total_txs = 0;
 
     for i in (a + 1..=b).rev() {
-        let txs_timers = txs_timers.clone();
         let svm = svm.clone();
         let tm = tm.clone();
         let from_key = format!("0x{}", i);
-        let from_key_vec = from_key.as_bytes().to_vec();
         for j in a..i {
-            let txs_timers = txs_timers.clone();
-            let txid: u64 = ((i as u64) << 32) + (j as u64);
-
-            total_txs += 1;
-
             let tm = tm.clone();
             let svm = svm.clone();
+
+            let txid: u64 = ((i as u64) << 32) + (j as u64);
+            total_txs += 1;
+
             let from_key = from_key.clone();
-            let from_key_vec = from_key_vec.clone();
             let to_key = format!("0x{}", j);
-            let to_key_vec = to_key.as_bytes().to_vec();
+            let amt = SVMPrimitives::U24(1);
+            let tx_body = TxBody {
+                tx_hash: format!("{}", txid),
+                code_hash: TRANSFER_CODE_ID.to_owned(),
+                objs: vec![from_key, to_key],
+                args: vec![amt],
+            };
 
             set.spawn(async move {
-                let (result, timers) = retry_transaction_with_timers(tm, |txn| {
-                    let (mut vm_mrs, mut mem_mrs) = (0, 0);
-
-                    let now = Instant::now();
-                    let from_value = match txn.read(from_key_vec.clone()) {
-                        Some(value) => {
-                            mem_mrs += now.elapsed().as_micros();
-                            value
-                        }
-                        None => {
-                            mem_mrs += now.elapsed().as_micros();
-                            return (
-                                Err(format!("key={} does not exist", from_key)),
-                                (vm_mrs, mem_mrs),
-                            );
-                        }
-                    };
-                    let now = Instant::now();
-                    let to_value = match txn.read(to_key_vec.clone()) {
-                        Some(value) => {
-                            mem_mrs += now.elapsed().as_micros();
-                            value
-                        }
-                        None => {
-                            mem_mrs += now.elapsed().as_micros();
-                            return (
-                                Err(format!("key={} does not exist", to_key)),
-                                (vm_mrs, mem_mrs),
-                            );
-                        }
-                    };
-                    let amt = SVMPrimitives::U24(1).to_term();
-
-                    let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
-
-                    let now = Instant::now();
-                    let svm_result = svm.clone().run_code(TRANSFER_CODE_ID, args);
-                    vm_mrs += now.elapsed().as_micros();
-
-                    match svm_result {
-                        Ok((term, _stats, _diags)) => {
-                            // eprint!("i={} {diags}", i);
-                            // println!(
-                            //     "from_key={} Result:\n{}",
-                            //     from_key.clone(),
-                            //     term.display_pretty(0)
-                            // );
-
-                            let result = SVMPrimitives::from_term(term.clone());
-                            match result {
-                                SVMPrimitives::Tup(ref els) => {
-                                    let (from_val, to_val) = (els[0].clone(), els[1].clone());
-                                    txn.write(from_key_vec.clone(), from_val);
-                                    txn.write(to_key_vec.clone(), to_val);
-                                    return (Ok(Some(result)), (vm_mrs, mem_mrs));
-                                }
-                                _ => {
-                                    return (
-                                        Err("unexpected type of result".to_owned()),
-                                        (vm_mrs, mem_mrs),
-                                    )
-                                }
-                            };
-                        }
-                        Err(e) => {
-                            return (
-                                Err(format!("svm execution failed err={}", e)),
-                                (vm_mrs, mem_mrs),
-                            )
-                        }
-                    };
-                });
-                if let Err(e) = result {
-                    error!("from_key={} err={}", from_key.clone(), e);
+                if let Err(e) = process_tx(tx_body.clone(), tm, svm) {
+                    error!("process tx failed tx_body={:#?} err={}", tx_body, e);
                 }
-                tokio::spawn(async move {
-                    txs_timers.write().await.insert(txid, timers);
-                });
             });
         }
     }

@@ -1,3 +1,4 @@
+use crate::examples::query::query;
 use crate::{block_stm::svm_memory::SVMMemory, svm::svm::SVM};
 use std::sync::Arc;
 use transfer::reverse_transfer;
@@ -9,15 +10,14 @@ pub mod transfer;
 
 pub async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     let a = 0;
-    let b = 100;
+    let b = 10;
 
-    alloc::alloc(tm.clone(), a, b).await;
+    alloc::alloc_incremental(tm.clone(), a, b).await;
 
     // info!("{:?}", make_move(tm, svm, 0).await);
-    // query(tm.clone(), a, b);
+    query(tm.clone(), a, b);
 
     // transfer(tm.clone(), svm.clone(), a, b).await;
     reverse_transfer(tm.clone(), svm.clone(), a, b).await;
-
-    // query(tm.clone(), a, b);
+    query(tm.clone(), a, b);
 }

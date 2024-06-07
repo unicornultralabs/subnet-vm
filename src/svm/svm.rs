@@ -22,7 +22,7 @@ impl SVM {
             (ADD_CODE_ID, ADD_CODE),
             (SUB_CODE_ID, SUB_CODE),
             (TRANSFER_CODE_ID, TRANSFER_CODE),
-            (DUANGUA_CODE_ID, DUANGUA_CODE),
+            // (DUANGUA_CODE_ID, DUANGUA_CODE),
         ];
         for code in codes {
             let builtins = builtins.clone();

@@ -4,7 +4,7 @@ use log::{error, info};
 use std::sync::Arc;
 use tokio::{task::JoinSet, time::Instant};
 
-pub async fn alloc(tm: Arc<SVMMemory>, a: u32, b: u32) {
+pub async fn alloc_incremental(tm: Arc<SVMMemory>, a: u32, b: u32) {
     let now = Instant::now();
     let mut set = JoinSet::new();
     for i in a..=b {
@@ -13,8 +13,9 @@ pub async fn alloc(tm: Arc<SVMMemory>, a: u32, b: u32) {
             let key = format!("0x{}", i);
             let key_vec = key.clone().as_bytes().to_vec();
             if let Err(e) = retry_transaction(tm, |txn| {
-                txn.write(key_vec.clone(), SVMPrimitives::U24(0));
-                Ok(SVMPrimitives::U24(0))
+                let alloc_amt = SVMPrimitives::U24(i);
+                txn.write(key_vec.clone(), alloc_amt.clone());
+                Ok(alloc_amt)
             }) {
                 error!("key={} err={}", key.clone(), e);
             }

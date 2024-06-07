@@ -1,5 +1,5 @@
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
-use crate::examples::alloc::alloc;
+use crate::examples::alloc::alloc_incremental;
 use crate::examples::make_move::make_move;
 use crate::executor::types::TxBody;
 use crate::svm::{primitive_types::SVMPrimitives, svm::SVM};
@@ -326,5 +326,5 @@ fn process_query_balance(query: QueryBalance, tm: Arc<SVMMemory>) -> Result<SVMP
 
 async fn on_ws_disconnected(tm: Arc<SVMMemory>, a: u32, b: u32) {
     println!("WebSocket connection closed or disconnected, reverting memory changes...");
-    alloc(tm.clone(), a, b).await;
+    alloc_incremental(tm.clone(), a, b).await;
 }
