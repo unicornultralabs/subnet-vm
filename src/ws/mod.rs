@@ -51,6 +51,9 @@ enum Message {
 }
 
 pub async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
+    alloc::alloc_incremental(tm.clone(), 0, 1_000_000).await;
+    alloc::alloc_duangua(tm.clone(), 1_000_001, 1_000_002).await;
+
     let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
     info!("web socket is running on: {}", addr);
 
@@ -158,7 +161,7 @@ async fn handle_connection(
                     }
                     Message::ReallocateMemory(_) => {
                         tokio::spawn(async move {
-                            alloc::alloc_incremental(tm_loop.clone(), 1, 1_000_000).await;
+                            alloc::alloc_incremental(tm_loop.clone(), 0, 1_000_000).await;
                             alloc::alloc_duangua(tm_loop.clone(), 1_000_001, 1_000_002).await;
                         });
                     }

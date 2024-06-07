@@ -37,6 +37,7 @@ pub fn process_tx(
                 let result = SVMPrimitives::from_term(term.clone());
                 match result {
                     SVMPrimitives::Tup(ref els) => {
+                        info!("{:#?}", els.clone());
                         // VM always returned the (un)modified objects as in the order
                         // of receiving in input. We write back to SVMMemmory.
                         let modified_objs = els.clone();

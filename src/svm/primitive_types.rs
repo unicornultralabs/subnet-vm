@@ -30,17 +30,34 @@ impl SVMPrimitives {
             Term::Fan {
                 fan: _,
                 tag: _,
+                els: _,
+            } => {
+                let mut arrs = vec![];
+                Self::collect_tup_to_vec(&mut arrs, term);
+                Self::Tup(arrs)
+            }
+            unsupported => {
+                error!("unsupported term {:#?}", term_c.clone());
+                unsupported.display_pretty(0);
+                todo!("unsupported term");
+            }
+        }
+    }
+
+    fn collect_tup_to_vec(collecting: &mut Vec<SVMPrimitives>, term: Term) {
+        let term_c = term.clone();
+        match term {
+            Term::Num { val: _ } => collecting.push(SVMPrimitives::from_term(term)),
+            Term::Fan {
+                fan: _,
+                tag: _,
                 ref els,
             } => {
                 let els = els.clone();
-                Self::Tup(
-                    els.clone()
-                        .iter()
-                        .map(|e| SVMPrimitives::from_term(e.clone()))
-                        .collect(),
-                )
+                for el in els {
+                    Self::collect_tup_to_vec(collecting, el);
+                }
             }
-            Term::Era {} => Self::Era,
             unsupported => {
                 error!("unsupported term {:#?}", term_c.clone());
                 unsupported.display_pretty(0);
