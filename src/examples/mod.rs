@@ -9,20 +9,15 @@ pub mod make_move;
 pub mod query;
 pub mod transfer;
 
-pub async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>) {
-    let a = 1;
-    let b = 10;
-
-    // alloc::alloc_incremental(tm.clone(), a, b).await;
-    // alloc::alloc_duangua(tm.clone(), a, b).await;
-    alloc::alloc_incremental(tm.clone(), 0, 1_000_000).await;
-    alloc::alloc_duangua(tm.clone(), 1_000_001, 1_000_002).await;
+pub async fn run_example(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
+    alloc::alloc_incremental(tm.clone(), a, b).await;
+    alloc::alloc_duangua(tm.clone(), b + 1, b + 2).await;
 
     // info!("{:?}", make_move(tm, svm, 0).await);
-    query(tm.clone(), a, b);
+    // query(tm.clone(), a, b);
 
     // transfer(tm.clone(), svm.clone(), a, b).await;
-    // reverse_transfer(tm.clone(), svm.clone(), a, b).await;
-    _ = make_move(tm.clone(), svm.clone(), 1);
+    reverse_transfer(tm.clone(), svm.clone(), a, b).await;
+    // _ = make_move(tm.clone(), svm.clone(), 1);
     query(tm.clone(), a, b);
 }
