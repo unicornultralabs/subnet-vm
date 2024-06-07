@@ -18,7 +18,7 @@ async fn main() {
     let svm = Arc::new(SVM::new());
     let addr = "0.0.0.0:9001";
 
-    run_example(tm.clone(), svm.clone()).await;
+    // run_example(tm.clone(), svm.clone()).await;
 
-    // ws::run_ws(&addr, tm, svm).await;
+    ws::run_ws(&addr, tm, svm).await;
 }

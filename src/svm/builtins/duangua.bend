@@ -1,5 +1,5 @@
 def main(persona_step, personb_step, aorb, target):
-  if aorb == 0:
+  if aorb == 1:
     new_persona_step = persona_step + 1
     if new_persona_step == target:
       return (new_persona_step, personb_step, 1)
