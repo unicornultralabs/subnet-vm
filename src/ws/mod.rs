@@ -2,6 +2,7 @@ use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
 use crate::examples::alloc::alloc;
 use crate::examples::make_move::make_move;
 use crate::svm::{primitive_types::SVMPrimitives, svm::SVM};
+use bend::fun::Term;
 use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use log::{error, info};
@@ -9,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, WebSocketStream};
+use types::TxBody;
+
+pub mod types;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SubmitTransaction {
@@ -47,6 +51,7 @@ enum Message {
     SubmitTransaction(SubmitTransaction),
     QueryBalance(QueryBalance),
     MakeMove(MakeMove),
+    SubmitTx(TxBody),
 }
 
 pub async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
@@ -241,6 +246,7 @@ async fn handle_connection(
                                     }
                                 });
                             }
+                            Message::SubmitTx(tx_body) => {}
                             _ => {
                                 let mut send = send_clone.lock().await;
                                 if let Err(e) = send.send("unsupported message".into()).await {
@@ -286,45 +292,88 @@ fn process_transaction(
 
         let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
         match svm.clone().run_code(&transaction.code_hash, args) {
-            Ok(Some((term, _stats, _diags))) => {
+            Ok((term, _stats, _diags)) => {
                 let result = SVMPrimitives::from_term(term.clone());
                 match result {
                     SVMPrimitives::Tup(ref els) => {
                         let (from_val, to_val) = (els[0].clone(), els[1].clone());
                         txn.write(from_key_vec.clone(), from_val);
                         txn.write(to_key_vec.clone(), to_val);
-                        return Ok(Some(result));
+                        return Ok(result);
                     }
                     _ => return Err("unexpected type of result".to_string()),
                 };
             }
-            Ok(None) => Err("svm execution failed err=none result".to_string()),
             Err(e) => Err(format!("svm execution failed err={}", e)),
         }
     });
 
     match result {
-        Ok(Some(res)) => Ok(res),
-        Ok(None) => Err(format!("from_key={} did not produce a result", from_key)),
+        Ok(res) => Ok(res),
         Err(e) => Err(format!("from_key={} err={}", from_key, e)),
+    }
+}
+
+fn process_tx(
+    tx_body: TxBody,
+    tm: Arc<SVMMemory>,
+    svm: Arc<SVM>,
+) -> Result<SVMPrimitives, std::string::String> {
+    let tm = tm.clone();
+    let svm = svm.clone();
+
+    let result = retry_transaction(tm, |txn| {
+        let mut objects = vec![];
+        for obj_hash in tx_body.objs.clone() {
+            let object = match txn.read(obj_hash.as_bytes().to_vec()) {
+                Some(object) => object,
+                None => return Err(format!("key={} does not exist", obj_hash)),
+            };
+            objects.push(object)
+        }
+        let mut args = objects;
+        args.extend_from_slice(&tx_body.args);
+
+        // due to limitations of HVM, we cannot read data from this code
+        // however, we can feed the data from arguments
+        // so arguments of main is the thing we want to modify PLUS the actual arguments.
+        let args: Vec<Term> = args.iter().map(|arg| arg.to_term()).collect();
+        match svm.clone().run_code(&tx_body.code_hash, Some(args)) {
+            Ok((term, _stats, _diags)) => {
+                let result = SVMPrimitives::from_term(term.clone());
+                match result {
+                    SVMPrimitives::Tup(ref els) => {
+                        // VM always returned the (un)modified objects as in the order
+                        // of receiving in input. We write back to SVMMemmory.
+                        let modified_objs = els.clone();
+                        for (index, obj_hash) in tx_body.objs.iter().enumerate() {
+                            txn.write(obj_hash.as_bytes().to_vec(), modified_objs[index].clone());
+                        }
+                        return Ok(result);
+                    }
+                    _ => return Err("unexpected type of result".to_string()),
+                };
+            }
+            Err(e) => Err(format!("svm execution failed err={}", e)),
+        }
+    });
+
+    match result {
+        Ok(res) => Ok(res),
+        Err(e) => Err(e),
     }
 }
 
 fn process_query_balance(query: QueryBalance, tm: Arc<SVMMemory>) -> Result<SVMPrimitives, String> {
     let key_vec = query.address.clone().as_bytes().to_vec();
-    let result = retry_transaction(tm.clone(), |txn| {
+    retry_transaction(tm.clone(), |txn| {
         let return_value = match txn.read(key_vec.clone()) {
             Some(value) => value,
             None => return Err(format!("key={} does not exist", query.address)),
         };
         // info!("key={} Result:{:?}", query.address, return_value);
-        Ok(Some(return_value))
-    });
-    match result {
-        Ok(Some(res)) => Ok(res),
-        Ok(None) => Err(format!("key={} did not produce a result", query.address)),
-        Err(e) => Err(format!("key={} err={}", query.address, e)),
-    }
+        Ok(return_value)
+    })
 }
 
 async fn on_ws_disconnected(tm: Arc<SVMMemory>, a: u32, b: u32) {

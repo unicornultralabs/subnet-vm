@@ -16,7 +16,7 @@ pub fn query(tm: Arc<SVMMemory>, a: u32, b: u32) {
                 None => return Err(format!("key={} does not exist", key)),
             };
             info!("key={} Result:{:?}", key.clone(), from_value);
-            Ok(None)
+            Ok(from_value)
         }) {
             error!("key={} err={}", key.clone(), e);
         }

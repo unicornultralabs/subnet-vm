@@ -29,7 +29,7 @@ pub async fn make_move(
             SVMPrimitives::U24(1).to_term(),
         ]);
         match svm.clone().run_code(DUANGUA_CODE_ID, args) {
-            Ok(Some((term, _stats, _diags))) => {
+            Ok((term, _stats, _diags)) => {
                 // eprint!("i={} {diags}", i);
                 // println!(
                 //     "from_key={} Result:\n{}",
@@ -46,21 +46,17 @@ pub async fn make_move(
                             txn.write(to_key_vec.clone(), person_step);
                         }
                         println!("{:?}", win);
-                        return Ok(Some(win));
+                        return Ok(win);
                     }
                     unknown => {
                         return Err(format!("unexpected type of result unknown={:?}", unknown))
                     }
                 };
             }
-            Ok(None) => return Err(format!("svm execution failed err=none result")),
             Err(e) => return Err(format!("svm execution failed err={}", e)),
         }
     }) {
-        Ok(ret_val) => match ret_val {
-            Some(ret_val) => return Ok(ret_val),
-            None => return Err(format!("from_key={} err=must return", from_key.clone())),
-        },
+        Ok(ret_val) => Ok(ret_val),
         Err(e) => {
             return Err(format!("from_key={} err={}", from_key.clone(), e));
         }

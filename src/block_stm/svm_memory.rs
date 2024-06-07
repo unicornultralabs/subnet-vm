@@ -90,12 +90,9 @@ impl<'a> Transaction<'a> {
     }
 }
 
-pub fn retry_transaction<F>(
-    tm: Arc<SVMMemory>,
-    transaction_fn: F,
-) -> Result<Option<SVMPrimitives>, String>
+pub fn retry_transaction<F>(tm: Arc<SVMMemory>, transaction_fn: F) -> Result<SVMPrimitives, String>
 where
-    F: Fn(&mut Transaction) -> Result<Option<SVMPrimitives>, String>,
+    F: Fn(&mut Transaction) -> Result<SVMPrimitives, String>,
 {
     loop {
         let mut txn = Transaction::new(&tm);

@@ -41,7 +41,7 @@ impl SVM {
         // TODO(rameight): HVM2 doesn't enable entrypoint running yet.
         // entrypoint: Option<&str>,
         arguments: Option<Vec<Term>>,
-    ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
+    ) -> Result<(Term, String, Diagnostics), Diagnostics> {
         let book = self.books.get(code_id).expect("load book failed").clone();
         let run_opts = RunOpts {
             linear_readback: false,
@@ -80,7 +80,7 @@ impl SVM {
         compile_opts: CompileOpts,
         diagnostics_cfg: DiagnosticsConfig,
         args: Option<Vec<Term>>,
-    ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
+    ) -> Result<(Term, String, Diagnostics), Diagnostics> {
         let CompileResult {
             hvm_book: core_book,
             labels,
@@ -97,7 +97,7 @@ impl SVM {
             compile_opts.adt_encoding,
         );
 
-        Ok(Some((term, stats, diags)))
+        Ok((term, stats, diags))
     }
 
     pub fn run_hvm(book: &hvm::hvm::Book) -> Result<(hvm::ast::Net, String), String> {

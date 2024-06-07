@@ -14,7 +14,7 @@ pub async fn alloc(tm: Arc<SVMMemory>, a: u32, b: u32) {
             let key_vec = key.clone().as_bytes().to_vec();
             if let Err(e) = retry_transaction(tm, |txn| {
                 txn.write(key_vec.clone(), SVMPrimitives::U24(0));
-                Ok(None)
+                Ok(SVMPrimitives::U24(0))
             }) {
                 error!("key={} err={}", key.clone(), e);
             }

@@ -32,7 +32,7 @@ pub async fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
 
                 let args = { Some(vec![from_value.to_term(), to_value.to_term(), amt]) };
                 match svm.clone().run_code(TRANSFER_CODE_ID, args) {
-                    Ok(Some((term, _stats, _diags))) => {
+                    Ok((term, _stats, _diags)) => {
                         // eprint!("i={} {diags}", i);
                         // println!(
                         //     "from_key={} Result:\n{}",
@@ -46,12 +46,11 @@ pub async fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
                                 let (from_val, to_val) = (els[0].clone(), els[1].clone());
                                 txn.write(from_key_vec.clone(), from_val);
                                 txn.write(to_key_vec.clone(), to_val);
-                                return Ok(Some(result));
+                                return Ok(result);
                             }
                             _ => return Err("unexpected type of result".to_owned()),
                         };
                     }
-                    Ok(None) => return Err(format!("svm execution failed err=none result")),
                     Err(e) => return Err(format!("svm execution failed err={}", e)),
                 };
             }) {
@@ -134,7 +133,7 @@ pub async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32)
                     vm_mrs += now.elapsed().as_micros();
 
                     match svm_result {
-                        Ok(Some((term, _stats, _diags))) => {
+                        Ok((term, _stats, _diags)) => {
                             // eprint!("i={} {diags}", i);
                             // println!(
                             //     "from_key={} Result:\n{}",
@@ -157,12 +156,6 @@ pub async fn reverse_transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32)
                                     )
                                 }
                             };
-                        }
-                        Ok(None) => {
-                            return (
-                                Err(format!("svm execution failed err=none result")),
-                                (vm_mrs, mem_mrs),
-                            )
                         }
                         Err(e) => {
                             return (
