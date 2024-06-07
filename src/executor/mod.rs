@@ -5,6 +5,7 @@ use std::sync::Arc;
 use types::TxBody;
 
 pub mod types;
+pub mod redis;
 
 pub fn process_tx(
     tx_body: TxBody,
