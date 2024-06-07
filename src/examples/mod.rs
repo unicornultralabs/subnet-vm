@@ -1,8 +1,6 @@
-use crate::examples::make_move::make_move;
 use crate::{block_stm::svm_memory::SVMMemory, svm::svm::SVM};
-use log::info;
-use transfer::reverse_transfer;
 use std::sync::Arc;
+use transfer::reverse_transfer;
 
 pub mod alloc;
 pub mod make_move;
