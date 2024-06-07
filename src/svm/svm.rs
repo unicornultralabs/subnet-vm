@@ -3,7 +3,7 @@ use bend::{
     compile_book,
     diagnostics::{Diagnostics, DiagnosticsConfig},
     fun::{self, load_book::do_parse_book, Book, Term},
-    readback_hvm_net, CompileOpts, CompileResult, RunOpts,
+    readback_hvm_net, run_book, CompileOpts, CompileResult, RunOpts,
 };
 use builtins::{ADD_CODE, ADD_CODE_ID, SUB_CODE, SUB_CODE_ID};
 use hvm::hvm::{GNet, TMem};
@@ -69,19 +69,10 @@ impl SVM {
             recursion_cycle: bend::diagnostics::Severity::Allow,
         };
         self.run_book(book, run_opts, compile_opts, diagnostics_cfg, arguments)
-
-        // TODO(rameight): by calling the hvm binary, it does not work as expected
-        // since it fails to streamlining the VM result
-        // run_book(
-        //     book,
-        //     run_opts,
-        //     compile_opts,
-        //     diagnostics_cfg,
-        //     arguments,
-        //     "run",
-        // )
+        // self.run_book_hvm_bin(book, run_opts, compile_opts, diagnostics_cfg, arguments)
     }
 
+    /// compile book with arguments then run with HVM2 library
     fn run_book(
         self: Arc<Self>,
         mut book: Book,
@@ -169,5 +160,18 @@ impl SVM {
             ));
         };
         Ok((net, stats))
+    }
+
+    // TODO(rameight): by calling the hvm binary, it does not work as expected
+    // since it fails to streamlining the VM result
+    pub fn run_book_hvm_bin(
+        self: Arc<Self>,
+        book: Book,
+        run_opts: RunOpts,
+        compile_opts: CompileOpts,
+        diagnostics_cfg: DiagnosticsConfig,
+        args: Option<Vec<Term>>,
+    ) -> Result<Option<(Term, String, Diagnostics)>, Diagnostics> {
+        run_book(book, run_opts, compile_opts, diagnostics_cfg, args, "run")
     }
 }
