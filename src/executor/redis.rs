@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Error, Result};
 use redis::{Commands as _, Connection, RedisResult};
-use redis_async::client::{ConnectionBuilder, PubsubConnection};
+use redis_async::client::ConnectionBuilder;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, sync::Arc, u8};
 use url::Url;
 
 
@@ -17,24 +17,17 @@ struct RedisUri {
 #[derive(Debug)]
 pub struct RedisService {
     client: redis::Client,
-    pubsub_con: PubsubConnection,
 }
 
 impl RedisService {
-    pub async fn new(redis_uri: String) -> Result<Self> {
+    pub fn new(redis_uri: String) -> Result<Self> {
         let client = redis::Client::open(redis_uri.clone())
             .map_err(|e| anyhow!("redis: cannot open client err={}", e))?;
         _ = client
             .get_connection()
             .map_err(|e| anyhow!("redis: cannot get connection err={}", e))?;
 
-        let conn_builder = Self::get_redis_conn_builder_from_uri(&redis_uri)?;
-        let pubsub_con = conn_builder
-            .pubsub_connect()
-            .await
-            .map_err(|e| anyhow!("create pub sub connection failed err={}", e))?;
-
-        Ok(Self { client, pubsub_con })
+        Ok(Self { client })
     }
 
     fn parse_redis_uri(redis_uri: &str) -> Result<RedisUri> {
@@ -89,11 +82,7 @@ impl RedisService {
         Ok(connection_builder)
     }
 
-    pub fn get_pubsub_conn(self: Arc<Self>) -> PubsubConnection {
-        self.pubsub_con.clone()
-    }
-
-    pub fn hset<T>(self: Arc<Self>, key: String, field: String, obj: T) -> Result<(), Error>
+    pub fn hset<T>(self: Arc<Self>, key: String, field: Vec<u8>, obj: T) -> Result<(), Error>
     where
         T: Serialize,
     {
@@ -101,7 +90,7 @@ impl RedisService {
             .client
             .get_connection()
             .map_err(|e| anyhow!("cannot get connection err={}", e))?;
-        match conn.hset::<String, String, String, usize>(
+        match conn.hset::<String, Vec<u8>, String, usize>(
             key,
             field,
             serde_json::to_string(&obj).unwrap(),
@@ -235,7 +224,7 @@ impl RedisService {
             .map_err(|e| anyhow!("redis failed to delete key={} err={}", key, e))
     }
 
-    pub async fn publish(self: Arc<Self>, chan_name: String, obj_str: String) -> Result<(), Error> {
+    pub fn publish(self: Arc<Self>, chan_name: String, obj_str: String) -> Result<(), Error> {
         let mut conn = self
             .client
             .get_connection()
@@ -244,7 +233,7 @@ impl RedisService {
         Ok(())
     }
 
-    pub async fn get_conn(self: Arc<Self>) -> RedisResult<Connection> {
+    pub fn get_conn(self: Arc<Self>) -> RedisResult<Connection> {
         self.client.get_connection()
     }
 }
@@ -265,31 +254,11 @@ impl DPNRedisKey {
         )
     }
 
-    pub fn get_peer_queue_k(masternode_id: String) -> String {
-        format!("peer_queue_ms#{}_", masternode_id)
-    }
-
-    pub fn get_peers_kf(masternode_id: String, ip_u32: u32) -> (String, String) {
-        (format!("peers_ms#{}", masternode_id), format!("{}", ip_u32))
-    }
-
-    pub fn get_peers_chan(masternode_id: String) -> String {
-        format!("peers_updated_ms#{}", masternode_id)
-    }
-
-    pub fn get_price_kf(peer_addr: String) -> (String, String) {
-        ("peer_price".to_owned(), peer_addr)
-    }
-
-    pub fn get_proxy_acc_kf(id: String) -> (String, String) {
-        ("proxy_acc".to_owned(), id)
-    }
-
-    pub fn get_proxy_acc_chan() -> String {
-        "proxy_acc_updated".to_string()
-    }
-
     pub fn get_price_chan() -> String {
         "price_updated".to_string()
+    }
+
+    pub fn get_vm_kf(key: Vec<u8>) -> (String, Vec<u8>) {
+        ("subnet_vm".to_owned(), key)
     }
 }
