@@ -11,3 +11,6 @@ pub const TRANSFER_CODE: &str = include_str!("./transfer.bend");
 
 pub const DUANGUA_CODE_ID: &str = "0xduangua";
 pub const DUANGUA_CODE: &str = include_str!("./duangua.bend");
+
+pub const DUANGUA3_CODE_ID: &str = "0xduangua3";
+pub const DUANGUA3_CODE: &str = include_str!("./duangua3.bend");

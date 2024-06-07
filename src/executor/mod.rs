@@ -44,7 +44,7 @@ pub fn process_tx(
                         }
                         return Ok(result);
                     }
-                    _ => return Err("unexpected type of result".to_string()),
+                    _ => return Err(format!("unexpected type of result term={:#?}", term)),
                 };
             }
             Err(e) => Err(format!("svm execution failed err={}", e)),

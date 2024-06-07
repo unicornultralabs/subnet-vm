@@ -1,4 +1,7 @@
-use super::builtins::{self, DUANGUA_CODE, DUANGUA_CODE_ID, TRANSFER_CODE, TRANSFER_CODE_ID};
+use super::builtins::{
+    self, DUANGUA3_CODE, DUANGUA3_CODE_ID, DUANGUA_CODE, DUANGUA_CODE_ID, TRANSFER_CODE,
+    TRANSFER_CODE_ID,
+};
 use bend::{
     compile_book,
     diagnostics::{Diagnostics, DiagnosticsConfig},
@@ -24,6 +27,7 @@ impl SVM {
             (SUB_CODE_ID, SUB_CODE),
             (TRANSFER_CODE_ID, TRANSFER_CODE),
             (DUANGUA_CODE_ID, DUANGUA_CODE),
+            (DUANGUA3_CODE_ID, DUANGUA3_CODE),
         ];
         for code in codes {
             let builtins = builtins.clone();

@@ -50,7 +50,7 @@ pub async fn transfer(tm: Arc<SVMMemory>, svm: Arc<SVM>, a: u32, b: u32) {
                                 txn.write(to_key_vec.clone(), to_val);
                                 return Ok(result);
                             }
-                            _ => return Err("unexpected type of result".to_owned()),
+                            _ => return Err(format!("unexpected type of result term={:#?}", term)),
                         };
                     }
                     Err(e) => return Err(format!("svm execution failed err={}", e)),

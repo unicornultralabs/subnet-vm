@@ -15,3 +15,14 @@ pub fn make_move(tm: Arc<SVMMemory>, svm: Arc<SVM>, aorb: u32) -> Result<SVMPrim
 
     process_tx(tx_body, tm, svm)
 }
+
+pub fn make_move3(tm: Arc<SVMMemory>, svm: Arc<SVM>, b: u32) -> Result<SVMPrimitives, String> {
+    let tx_body = TxBody {
+        tx_hash: "".to_owned(),
+        code_hash: "0xduangua3".to_owned(),
+        objs: vec![format!("0x{}", b + 1)],
+        args: vec![],
+    };
+
+    process_tx(tx_body, tm, svm)
+}
