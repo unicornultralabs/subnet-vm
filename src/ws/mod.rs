@@ -1,3 +1,4 @@
+use crate::block_stm::get_val;
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
 use crate::examples::alloc::{self};
 use crate::executor::process_tx;
@@ -92,7 +93,7 @@ async fn handle_connection(
                     Message::GetValueAt(GetValueAt { addr }) => {
                         tokio::spawn(async move {
                             let mut send = send_clone.lock().await;
-                            let result = get_val_at_addr(addr.clone(), tm_loop);
+                            let result = get_val(tm_loop, addr.clone());
                             // transform to confirmed transaction
                             let query_result = json!({
                                 "addr": addr,
@@ -116,20 +117,6 @@ async fn handle_connection(
     }
 
     info!("ws disconnected");
-}
-
-fn get_val_at_addr(addr: String, tm: Arc<SVMMemory>) -> Option<SVMPrimitives> {
-    let key_vec = addr.clone().as_bytes().to_vec();
-    match retry_transaction(tm.clone(), |txn| {
-        let return_value = match txn.read(key_vec.clone()) {
-            Some(value) => value,
-            None => return Err(format!("key={} does not exist", addr)),
-        };
-        Ok(return_value)
-    }) {
-        Ok(val) => Some(val),
-        Err(_) => None,
-    }
 }
 
 #[cfg(test)]
