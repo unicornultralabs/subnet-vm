@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum SVMPrimitives {
     U24(u32),
     Tup(Vec<SVMPrimitives>),
+    Era,
 }
 
 impl SVMPrimitives {
@@ -18,6 +19,7 @@ impl SVMPrimitives {
                 tag: bend::fun::Tag::Static,
                 els: inner.clone().iter().map(|e| e.clone().to_term()).collect(),
             },
+            SVMPrimitives::Era => bend::fun::Term::Era,
         }
     }
 
@@ -38,7 +40,7 @@ impl SVMPrimitives {
                         .collect(),
                 )
             }
-            // Term::Era {},
+            Term::Era {} => Self::Era,
             unsupported => {
                 error!("unsupported term {:#?}", term_c.clone());
                 unsupported.display_pretty(0);

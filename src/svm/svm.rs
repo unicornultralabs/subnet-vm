@@ -7,6 +7,7 @@ use bend::{
 };
 use builtins::{ADD_CODE, ADD_CODE_ID, SUB_CODE, SUB_CODE_ID};
 use hvm::hvm::{GNet, TMem};
+use log::info;
 use std::{collections::HashMap, path::Path, sync::Arc};
 
 pub struct SVM {
@@ -147,6 +148,7 @@ impl SVM {
                 net.show()
             )
         };
+        info!("{}", result);
 
         let mut p = hvm::ast::CoreParser::new(&result);
         let Ok(net) = p.parse_net() else {
