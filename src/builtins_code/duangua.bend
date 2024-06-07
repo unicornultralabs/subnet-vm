@@ -26,31 +26,36 @@ def GameState/new_game(p1_id, p2_id, target):
 
 def GameState/play(player_id):
   open GameState: gs
-  # game ended
-  if gs.winner > 0:
-    return (gs.winner, gs)
-  else: # dunno why syntax err :))
-    x = 1 
-
-  if player_id == gs.p1:
-    gs.p1_step = gs.p1_step + 1
-    if gs.p1_step == gs.target:
-      gs.winner = 1
-    else:
-      x = 1
-    return (gs.winner, gs)
-  else:
-    x = 1
-
-  if player_id == gs.p2:
-    gs.p2_step = gs.p2_step + 1
-    if gs.p1_step == gs.target:
-      gs.winner = 1
-    else:
-      x = 1
-    return (gs.winner, gs)
-  else: # unknown player changes nothing to the game state
-    return (gs.winner, gs)
+  switch gs.winner:
+    case 0: # game not ended
+      if player_id == gs.p1:
+        gs.p1_step = gs.p1_step + 1
+        if gs.p1_step == gs.target:
+          gs.winner = 1
+        else:
+          x = 1
+        return (gs.winner, gs)
+      else:
+        x = 1
+      
+      if player_id == gs.p2:
+        gs.p2_step = gs.p2_step + 1
+        if gs.p1_step == gs.target:
+          gs.winner = 1
+        else:
+          x = 1
+        return (gs.winner, gs)
+      else:
+        x = 1
+      
+      # unknown player changes nothing to the game state
+      return (gs.winner, gs)
+    case 1: # game ended, 1 won
+      return (gs.winner, gs)
+    case 2: # game ended, 2 won
+      return (gs.winner, gs)
+    case _: # should not fall to
+      return (gs.winner, gs)
 
 def main():
   gs = GameState/new_game("p1", "p2", 5)
