@@ -27,3 +27,25 @@ pub async fn alloc_incremental(tm: Arc<SVMMemory>, a: u32, b: u32) {
         now.elapsed().as_micros()
     );
 }
+
+pub async fn alloc_duangua(tm: Arc<SVMMemory>, a: u32, b: u32) {
+    let now = Instant::now();
+    let tm = tm.clone();
+    let keya = format!("0x{}", a);
+    let keyb = format!("0x{}", b);
+    if let Err(_) = retry_transaction(tm, |txn| {
+        let alloc_amt = SVMPrimitives::U24(0);
+        txn.write(keya.as_bytes().to_vec(), alloc_amt.clone());
+        txn.write(keyb.as_bytes().to_vec(), alloc_amt.clone());
+        Ok(alloc_amt)
+    }) {
+        error!(
+            "fuck failed allocation duangua elapesed_microsec={}",
+            now.elapsed().as_micros()
+        );
+    }
+    info!(
+        "finish allocation duangua elapesed_microsec={}",
+        now.elapsed().as_micros()
+    );
+}

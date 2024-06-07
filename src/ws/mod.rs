@@ -1,5 +1,5 @@
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
-use crate::examples::alloc::alloc_incremental;
+use crate::examples::alloc::{self, alloc_incremental};
 use crate::examples::make_move::make_move;
 use crate::executor::process_tx;
 use crate::executor::types::{TxBody, TxResult};
@@ -47,6 +47,7 @@ struct MakeMove {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 enum Message {
+    ReallocateMemory(()),
     SubmitTransaction(SubmitTransaction),
     QueryBalance(QueryBalance),
     MakeMove(MakeMove),
@@ -83,111 +84,69 @@ async fn handle_connection(
     let (write, mut read) = ws_stream.split();
     let ws_send = Arc::new(Mutex::new(write));
 
-    while let Some(message) = read.next().await {
-        match message {
-            Ok(msg) => {
-                if msg.is_text() || msg.is_binary() {
-                    let text = msg.clone().into_text().unwrap();
-                    let send_clone = Arc::clone(&ws_send);
+    while let Some(Ok(msg)) = read.next().await {
+        let send_clone = Arc::clone(&ws_send);
+        let tm_loop = Arc::clone(&tm);
+        let svm_loop = Arc::clone(&svm);
+        tokio::spawn(async move {
+            if msg.is_text() || msg.is_binary() {
+                let text = msg.clone().into_text().unwrap();
 
-                    info!("Received message: {:?}", text);
+                let message = match serde_json::from_str::<Message>(&text) {
+                    Ok(message) => message,
+                    Err(_) => {
+                        let mut send = send_clone.lock().await;
+                        _ = send
+                            .send(format!("VM does not support message: {}", text).into())
+                            .await;
+                        return ();
+                    }
+                };
 
-                    let message = match serde_json::from_str::<Message>(&text) {
-                        Ok(message) => message,
-                        Err(_) => {
+                info!("Received message: {:?}", message);
+                match message {
+                    Message::SubmitTx(tx_body) => {
+                        info!("{:#?}", tx_body.clone());
+                        let mut send = send_clone.lock().await;
+                        let tx_result = match process_tx(tx_body.clone(), tm_loop, svm_loop) {
+                            Ok(ret_val) => TxResult {
+                                code_hash: tx_body.code_hash,
+                                tx_hash: tx_body.tx_hash,
+                                ret_value: Some(ret_val),
+                                status: true,
+                                errs: None,
+                            },
+                            Err(e) => TxResult {
+                                tx_hash: tx_body.tx_hash,
+                                code_hash: tx_body.code_hash,
+                                status: false,
+                                ret_value: None,
+                                errs: Some(e.clone().into()),
+                            },
+                        };
+                        let json_tx_result = serde_json::to_string(&tx_result).unwrap();
+                        if let Err(e) = send.send(json_tx_result.into()).await {
+                            println!("failed to send confirmed transaction: {}", e);
+                        }
+                    }
+                    Message::SubmitTransaction(transaction) => {
+                        tokio::spawn(async move {
                             let mut send = send_clone.lock().await;
-                            if let Err(e) = send.send("unknown msg".into()).await {
-                                println!("failed to send query balance error: {}", e);
-                            }
-                            continue;
-                        }
-                    };
-
-                    info!("Received message: {:?}", message);
-                    let tm_loop = Arc::clone(&tm);
-                    let svm_loop = Arc::clone(&svm);
-                    match message {
-                        Message::SubmitTx(tx_body) => {
-                            info!("{:#?}", tx_body.clone());
-                            tokio::spawn(async move {
-                                let mut send = send_clone.lock().await;
-                                let tx_result = match process_tx(tx_body.clone(), tm_loop, svm_loop)
-                                {
-                                    Ok(ret_val) => TxResult {
-                                        code_hash: tx_body.code_hash,
-                                        tx_hash: tx_body.tx_hash,
-                                        ret_value: Some(ret_val),
-                                        status: true,
-                                        errs: None,
-                                    },
-                                    Err(e) => TxResult {
-                                        tx_hash: tx_body.tx_hash,
-                                        code_hash: tx_body.code_hash,
-                                        status: false,
-                                        ret_value: None,
-                                        errs: Some(e.clone().into()),
-                                    },
-                                };
-                                let json_tx_result = serde_json::to_string(&tx_result).unwrap();
-                                if let Err(e) = send.send(json_tx_result.into()).await {
-                                    println!("failed to send confirmed transaction: {}", e);
-                                }
-                            });
-                        }
-                        Message::SubmitTransaction(transaction) => {
-                            tokio::spawn(async move {
-                                let mut send = send_clone.lock().await;
-                                let result =
-                                    process_transaction(transaction.clone(), tm_loop, svm_loop);
-                                match result {
-                                    Ok(ret_val) => {
-                                        if let Ok(_json_result) = serde_json::to_string(&ret_val) {
-                                            // transform to confirmed transaction
-                                            let confirmed_transaction = ConfirmedTransaction {
-                                                code_hash: transaction.code_hash,
-                                                tx_hash: transaction.tx_hash,
-                                                ret_value: Some(ret_val),
-                                                status: true,
-                                                errs: None,
-                                            };
-                                            if let Ok(json_result) =
-                                                serde_json::to_string(&confirmed_transaction)
-                                            {
-                                                if let Err(e) = send.send(json_result.into()).await
-                                                {
-                                                    println!(
-                                                        "failed to send confirmed transaction: {}",
-                                                        e
-                                                    );
-                                                }
-                                            } else {
-                                                if let Err(e) = send.send("failed to convert confirmed transaction to json string".into()).await {
-                                                println!("failed to convert confirmed transaction to json string: {}", e);
-                                            }
-                                            }
-                                        } else {
-                                            if let Err(e) = send
-                                                .send(
-                                                    "failed to convert svm result to json string"
-                                                        .into(),
-                                                )
-                                                .await
-                                            {
-                                                println!("failed to convert svm result to json string: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(err) => {
-                                        let confirmed_tx = ConfirmedTransaction {
-                                            tx_hash: transaction.tx_hash,
+                            let result =
+                                process_transaction(transaction.clone(), tm_loop, svm_loop);
+                            match result {
+                                Ok(ret_val) => {
+                                    if let Ok(_json_result) = serde_json::to_string(&ret_val) {
+                                        // transform to confirmed transaction
+                                        let confirmed_transaction = ConfirmedTransaction {
                                             code_hash: transaction.code_hash,
-                                            status: false,
-                                            ret_value: None,
-                                            errs: Some(err.clone().into()),
+                                            tx_hash: transaction.tx_hash,
+                                            ret_value: Some(ret_val),
+                                            status: true,
+                                            errs: None,
                                         };
-                                        // send confirmed transaction
                                         if let Ok(json_result) =
-                                            serde_json::to_string(&confirmed_tx)
+                                            serde_json::to_string(&confirmed_transaction)
                                         {
                                             if let Err(e) = send.send(json_result.into()).await {
                                                 println!(
@@ -197,103 +156,131 @@ async fn handle_connection(
                                             }
                                         } else {
                                             if let Err(e) = send.send("failed to convert confirmed transaction to json string".into()).await {
+                                                println!("failed to convert confirmed transaction to json string: {}", e);
+                                            }
+                                        }
+                                    } else {
+                                        if let Err(e) = send
+                                            .send(
+                                                "failed to convert svm result to json string"
+                                                    .into(),
+                                            )
+                                            .await
+                                        {
+                                            println!(
+                                                "failed to convert svm result to json string: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    let confirmed_tx = ConfirmedTransaction {
+                                        tx_hash: transaction.tx_hash,
+                                        code_hash: transaction.code_hash,
+                                        status: false,
+                                        ret_value: None,
+                                        errs: Some(err.clone().into()),
+                                    };
+                                    // send confirmed transaction
+                                    if let Ok(json_result) = serde_json::to_string(&confirmed_tx) {
+                                        if let Err(e) = send.send(json_result.into()).await {
+                                            println!("failed to send confirmed transaction: {}", e);
+                                        }
+                                    } else {
+                                        if let Err(e) = send.send("failed to convert confirmed transaction to json string".into()).await {
                                             println!("failed to convert confirmed transaction to json string: {}", e);
                                         }
-                                        }
                                     }
                                 }
-                            });
-                        }
-                        Message::QueryBalance(query) => {
-                            tokio::spawn(async move {
-                                let mut send = send_clone.lock().await;
-                                let result = process_query_balance(query.clone(), tm_loop);
-                                match result {
-                                    Ok(ret_val) => {
-                                        // transform to confirmed transaction
-                                        let confirmed_transaction = ConfirmedTransaction {
-                                            code_hash: query.code_hash,
-                                            tx_hash: "".into(),
-                                            ret_value: Some(ret_val),
-                                            status: true,
-                                            errs: None,
-                                        };
-                                        if let Ok(json_result) =
-                                            serde_json::to_string(&confirmed_transaction)
-                                        {
-                                            if let Err(e) = send.send(json_result.into()).await {
-                                                println!(
-                                                    "failed to send query balance result: {}",
-                                                    e
-                                                );
-                                            }
-                                        } else {
-                                            if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
+                            }
+                        });
+                    }
+                    Message::QueryBalance(query) => {
+                        tokio::spawn(async move {
+                            let mut send = send_clone.lock().await;
+                            let result = process_query_balance(query.clone(), tm_loop);
+                            match result {
+                                Ok(ret_val) => {
+                                    // transform to confirmed transaction
+                                    let confirmed_transaction = ConfirmedTransaction {
+                                        code_hash: query.code_hash,
+                                        tx_hash: "".into(),
+                                        ret_value: Some(ret_val),
+                                        status: true,
+                                        errs: None,
+                                    };
+                                    if let Ok(json_result) =
+                                        serde_json::to_string(&confirmed_transaction)
+                                    {
+                                        if let Err(e) = send.send(json_result.into()).await {
+                                            println!("failed to send query balance result: {}", e);
+                                        }
+                                    } else {
+                                        if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
                                             println!("failed to convert query balance result to json string: {}", e);
                                         }
-                                        }
-                                    }
-                                    Err(err) => {
-                                        if let Err(e) = send.send(err.into()).await {
-                                            println!("failed to send query balance error: {}", e);
-                                        }
                                     }
                                 }
-                            });
-                        }
-                        Message::MakeMove(m) => {
-                            tokio::spawn(async move {
-                                let mut a_or_b = 0;
-                                match m.address == format!("0x0") {
-                                    true => a_or_b = 0,
-                                    false => a_or_b = 1,
+                                Err(err) => {
+                                    if let Err(e) = send.send(err.into()).await {
+                                        println!("failed to send query balance error: {}", e);
+                                    }
                                 }
-                                let mut send = send_clone.lock().await;
-                                let result = make_move(tm_loop, svm_loop, a_or_b).await;
-                                match result {
-                                    Ok(ret_val) => {
-                                        // transform to confirmed transaction
-                                        let confirmed_transaction = ConfirmedTransaction {
-                                            code_hash: "0xduangua".into(),
-                                            tx_hash: "".into(),
-                                            ret_value: Some(ret_val),
-                                            status: true,
-                                            errs: None,
-                                        };
-                                        if let Ok(json_result) =
-                                            serde_json::to_string(&confirmed_transaction)
-                                        {
-                                            if let Err(e) = send.send(json_result.into()).await {
-                                                println!(
-                                                    "failed to send query balance result: {}",
-                                                    e
-                                                );
-                                            }
-                                        } else {
-                                            if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
+                            }
+                        });
+                    }
+                    Message::MakeMove(m) => {
+                        tokio::spawn(async move {
+                            let mut a_or_b = 0;
+                            match m.address == format!("0x0") {
+                                true => a_or_b = 0,
+                                false => a_or_b = 1,
+                            }
+                            let mut send = send_clone.lock().await;
+                            let result = make_move(tm_loop, svm_loop, a_or_b).await;
+                            match result {
+                                Ok(ret_val) => {
+                                    // transform to confirmed transaction
+                                    let confirmed_transaction = ConfirmedTransaction {
+                                        code_hash: "0xduangua".into(),
+                                        tx_hash: "".into(),
+                                        ret_value: Some(ret_val),
+                                        status: true,
+                                        errs: None,
+                                    };
+                                    if let Ok(json_result) =
+                                        serde_json::to_string(&confirmed_transaction)
+                                    {
+                                        if let Err(e) = send.send(json_result.into()).await {
+                                            println!("failed to send query balance result: {}", e);
+                                        }
+                                    } else {
+                                        if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
                                             println!("failed to convert query balance result to json string: {}", e);
                                         }
-                                        }
-                                    }
-                                    Err(err) => {
-                                        if let Err(e) = send.send(err.into()).await {
-                                            println!("failed to send query balance error: {}", e);
-                                        }
                                     }
                                 }
-                            });
-                        }
+                                Err(err) => {
+                                    if let Err(e) = send.send(err.into()).await {
+                                        println!("failed to send query balance error: {}", e);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    Message::ReallocateMemory(_) => {
+                        tokio::spawn(async move {
+                            alloc::alloc_incremental(tm_loop.clone(), 1, 1_000_000).await;
+                            alloc::alloc_duangua(tm_loop.clone(), 1_000_001, 1_000_002).await;
+                        });
                     }
                 }
             }
-            Err(e) => {
-                error!("Error processing message: {}", e);
-                break;
-            }
-        }
+        });
     }
-    // Handle WebSocket disconnection
-    on_ws_disconnected(tm, 1, 1_000_000).await;
+
+    info!("ws disconnected");
 }
 
 fn process_transaction(
@@ -353,9 +340,4 @@ fn process_query_balance(query: QueryBalance, tm: Arc<SVMMemory>) -> Result<SVMP
         // info!("key={} Result:{:?}", query.address, return_value);
         Ok(return_value)
     })
-}
-
-async fn on_ws_disconnected(tm: Arc<SVMMemory>, a: u32, b: u32) {
-    println!("WebSocket connection closed or disconnected, reverting memory changes...");
-    alloc_incremental(tm.clone(), a, b).await;
 }

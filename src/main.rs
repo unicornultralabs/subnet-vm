@@ -20,6 +20,7 @@ async fn main() {
 
     // run_example(tm.clone(), svm.clone()).await;
     alloc::alloc_incremental(tm.clone(), 1, 1_000_000).await;
+    alloc::alloc_duangua(tm.clone(), 1_000_001, 1_000_002).await;
 
     ws::run_ws(&addr, tm, svm).await;
 }
