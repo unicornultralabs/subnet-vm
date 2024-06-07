@@ -1,54 +1,18 @@
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
 use crate::examples::alloc::{self};
 use crate::executor::process_tx;
-use crate::executor::types::{TxBody, TxResult};
+use crate::executor::types::TxResult;
 use crate::svm::{primitive_types::SVMPrimitives, svm::SVM};
+use events::{GetValueAt, Message, SubmitTx};
 use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use log::{error, info};
-use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct SubmitTransaction {
-    tx_hash: String,
-    code_hash: String,
-    from: String,
-    to: String,
-    amount: u32,
-}
-
-#[derive(Serialize)]
-struct ConfirmedTransaction {
-    tx_hash: String,
-    code_hash: String,
-    status: bool,
-    ret_value: Option<SVMPrimitives>,
-    errs: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct QueryBalance {
-    code_hash: String,
-    address: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct MakeMove {
-    code_hash: String,
-    address: String,
-    step: u32,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
-enum Message {
-    ReallocateMemory(()),
-    QueryBalance(QueryBalance),
-    SubmitTx(TxBody),
-}
+pub mod events;
 
 pub async fn run_ws(addr: &str, tm: Arc<SVMMemory>, svm: Arc<SVM>) {
     alloc::alloc_incremental(tm.clone(), 0, 1_000_000).await;
@@ -104,7 +68,7 @@ async fn handle_connection(
 
                 info!("Received message: {:?}", message);
                 match message {
-                    Message::SubmitTx(tx_body) => {
+                    Message::SubmitTx(SubmitTx { tx_body }) => {
                         let mut send = send_clone.lock().await;
                         let tx_result = match process_tx(tx_body.clone(), tm_loop, svm_loop) {
                             Ok(ret_val) => TxResult {
@@ -125,37 +89,17 @@ async fn handle_connection(
                         let json_tx_result = serde_json::to_string(&tx_result).unwrap();
                         _ = send.send(json_tx_result.into()).await;
                     }
-                    Message::QueryBalance(query) => {
+                    Message::GetValueAt(GetValueAt { addr }) => {
                         tokio::spawn(async move {
                             let mut send = send_clone.lock().await;
-                            let result = process_query_balance(query.clone(), tm_loop);
-                            match result {
-                                Ok(ret_val) => {
-                                    // transform to confirmed transaction
-                                    let confirmed_transaction = ConfirmedTransaction {
-                                        code_hash: query.code_hash,
-                                        tx_hash: "".into(),
-                                        ret_value: Some(ret_val),
-                                        status: true,
-                                        errs: None,
-                                    };
-                                    if let Ok(json_result) =
-                                        serde_json::to_string(&confirmed_transaction)
-                                    {
-                                        if let Err(e) = send.send(json_result.into()).await {
-                                            println!("failed to send query balance result: {}", e);
-                                        }
-                                    } else {
-                                        if let Err(e) = send.send("failed to convert query balance result to json string".into()).await {
-                                            println!("failed to convert query balance result to json string: {}", e);
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    if let Err(e) = send.send(err.into()).await {
-                                        println!("failed to send query balance error: {}", e);
-                                    }
-                                }
+                            let result = get_val_at_addr(addr.clone(), tm_loop);
+                            // transform to confirmed transaction
+                            let query_result = json!({
+                                "addr": addr,
+                                "value": result
+                            });
+                            if let Err(e) = send.send(query_result.to_string().into()).await {
+                                println!("failed to send query balance result: {}", e);
                             }
                         });
                     }
@@ -163,6 +107,7 @@ async fn handle_connection(
                         tokio::spawn(async move {
                             alloc::alloc_incremental(tm_loop.clone(), 0, 1_000_000).await;
                             alloc::alloc_duangua(tm_loop.clone(), 1_000_001, 1_000_002).await;
+                            info!("reallocated memory");
                         });
                     }
                 }
@@ -173,13 +118,49 @@ async fn handle_connection(
     info!("ws disconnected");
 }
 
-fn process_query_balance(query: QueryBalance, tm: Arc<SVMMemory>) -> Result<SVMPrimitives, String> {
-    let key_vec = query.address.clone().as_bytes().to_vec();
-    retry_transaction(tm.clone(), |txn| {
+fn get_val_at_addr(addr: String, tm: Arc<SVMMemory>) -> Option<SVMPrimitives> {
+    let key_vec = addr.clone().as_bytes().to_vec();
+    match retry_transaction(tm.clone(), |txn| {
         let return_value = match txn.read(key_vec.clone()) {
             Some(value) => value,
-            None => return Err(format!("key={} does not exist", query.address)),
+            None => return Err(format!("key={} does not exist", addr)),
         };
         Ok(return_value)
-    })
+    }) {
+        Ok(val) => Some(val),
+        Err(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use events::ReallocateMemory;
+
+    use crate::executor::types::TxBody;
+
+    use super::*;
+
+    #[test]
+    fn sample_events_json() {
+        let events = vec![
+            // events send by frontend
+            Message::GetValueAt(GetValueAt {
+                addr: "0x1".to_string(),
+            }),
+            Message::ReallocateMemory(ReallocateMemory {}),
+            Message::SubmitTx(SubmitTx {
+                tx_body: TxBody {
+                    tx_hash: "0xtxhash".to_string(),
+                    code_hash: "0xcodehash".to_string(),
+                    objs: vec![],
+                    args: vec![],
+                },
+            }),
+        ];
+
+        let events_json = events.iter().map(|e| serde_json::to_string(&e).unwrap());
+        for ejson in events_json {
+            println!("{:?}", ejson)
+        }
+    }
 }
