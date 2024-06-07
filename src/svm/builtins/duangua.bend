@@ -28,26 +28,26 @@ def GameState/play(player_id):
   open GameState: gs
   switch gs.winner:
     case 0: # game not ended
-      if player_id == gs.p1:
+      if player_id == gs.p1_id:
         gs.p1_step = gs.p1_step + 1
         if gs.p1_step == gs.target:
           gs.winner = 1
         else:
-          x = 1
+          gs.winner = gs.winner
         return (gs.winner, gs)
       else:
-        x = 1
-      
-      if player_id == gs.p2:
+        gs.winner = gs.winner
+
+      if player_id == gs.p2_id:
         gs.p2_step = gs.p2_step + 1
         if gs.p1_step == gs.target:
           gs.winner = 1
         else:
-          x = 1
+          gs.winner = gs.winner
         return (gs.winner, gs)
       else:
-        x = 1
-      
+        gs.winner = gs.winner
+
       # unknown player changes nothing to the game state
       return (gs.winner, gs)
     case 1: # game ended, 1 won
@@ -57,9 +57,12 @@ def GameState/play(player_id):
     case _: # should not fall to
       return (gs.winner, gs)
 
+# due to limitations of HVM, we cannot read data from this code
+# however, we can feed the data from arguments
+# so arguments of main is the thing we want to modify PLUS the actual arguments.
 def main():
-  gs = GameState/new_game("p1", "p2", 5)
-  gs = gs.play("p1")
+  gs = GameState/new_game(1, 2, 5)
+  gs = gs.play(1)
   return gs
 
 # def dua(game_state, player):
