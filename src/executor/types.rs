@@ -11,3 +11,12 @@ pub struct TxBody {
     /// arguments for code execution
     pub args: Vec<SVMPrimitives>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TxResult {
+    pub tx_hash: String,
+    pub code_hash: String,
+    pub status: bool,
+    pub ret_value: Option<SVMPrimitives>,
+    pub errs: Option<String>,
+}

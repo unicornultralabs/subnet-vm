@@ -1,9 +1,9 @@
 use crate::block_stm::svm_memory::{retry_transaction, SVMMemory};
 use crate::examples::alloc::alloc_incremental;
 use crate::examples::make_move::make_move;
-use crate::executor::types::TxBody;
+use crate::executor::process_tx;
+use crate::executor::types::{TxBody, TxResult};
 use crate::svm::{primitive_types::SVMPrimitives, svm::SVM};
-use bend::fun::Term;
 use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use log::{error, info};
@@ -92,6 +92,32 @@ async fn handle_connection(
                         let tm_loop = Arc::clone(&tm);
                         let svm_loop = Arc::clone(&svm);
                         match message {
+                            Message::SubmitTx(tx_body) => {
+                                tokio::spawn(async move {
+                                    let mut send = send_clone.lock().await;
+                                    let tx_result =
+                                        match process_tx(tx_body.clone(), tm_loop, svm_loop) {
+                                            Ok(ret_val) => TxResult {
+                                                code_hash: tx_body.code_hash,
+                                                tx_hash: tx_body.tx_hash,
+                                                ret_value: Some(ret_val),
+                                                status: true,
+                                                errs: None,
+                                            },
+                                            Err(e) => TxResult {
+                                                tx_hash: tx_body.tx_hash,
+                                                code_hash: tx_body.code_hash,
+                                                status: false,
+                                                ret_value: None,
+                                                errs: Some(e.clone().into()),
+                                            },
+                                        };
+                                    let json_tx_result = serde_json::to_string(&tx_result).unwrap();
+                                    if let Err(e) = send.send(json_tx_result.into()).await {
+                                        println!("failed to send confirmed transaction: {}", e);
+                                    }
+                                });
+                            }
                             Message::SubmitTransaction(transaction) => {
                                 tokio::spawn(async move {
                                     let mut send = send_clone.lock().await;
@@ -244,7 +270,6 @@ async fn handle_connection(
                                     }
                                 });
                             }
-                            Message::SubmitTx(tx_body) => {}
                             _ => {
                                 let mut send = send_clone.lock().await;
                                 if let Err(e) = send.send("unsupported message".into()).await {
