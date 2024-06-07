@@ -33,11 +33,9 @@ pub fn process_tx(
         let args: Vec<Term> = args.iter().map(|arg| arg.to_term()).collect();
         match svm.clone().run_code(&tx_body.code_hash, Some(args)) {
             Ok((term, _stats, _diags)) => {
-                info!("{:#?}", term.clone());
                 let result = SVMPrimitives::from_term(term.clone());
                 match result {
                     SVMPrimitives::Tup(ref els) => {
-                        info!("{:#?}", els.clone());
                         // VM always returned the (un)modified objects as in the order
                         // of receiving in input. We write back to SVMMemmory.
                         let modified_objs = els.clone();

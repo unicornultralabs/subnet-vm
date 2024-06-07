@@ -148,7 +148,6 @@ impl SVM {
                 net.show()
             )
         };
-        info!("{}", result);
 
         let mut p = hvm::ast::CoreParser::new(&result);
         let Ok(net) = p.parse_net() else {
